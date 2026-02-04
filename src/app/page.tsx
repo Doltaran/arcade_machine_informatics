@@ -61,8 +61,8 @@ export default function Home() {
   const terminalPos: Position = { x: 430, y: groundY - TERMINAL_HEIGHT };
   const exitPos: Position = { x: CANVAS_WIDTH - EXIT_WIDTH - 30, y: groundY - EXIT_HEIGHT };
 
-  // Level 2 positions
-  const combatRobotPos: Position = { x: 500, y: groundY - COMBAT_ROBOT_HEIGHT }; // Робот левее
+  // Level 2 positions - ГЕНЕРАТОР СПРАВА, РОБОТ ЛЕВЕЕ
+  const combatRobotPos: Position = { x: 500, y: groundY - COMBAT_ROBOT_HEIGHT }; // Робот x=500
   const generatorPos: Position = { x: CANVAS_WIDTH - 180, y: groundY - 120 }; // Генератор справа
   const level2TerminalPos: Position = { x: 200, y: groundY - TERMINAL_HEIGHT };
   const level2ExitPos: Position = { x: CANVAS_WIDTH - EXIT_WIDTH - 30, y: groundY - EXIT_HEIGHT };
@@ -197,83 +197,83 @@ export default function Home() {
           errorMessageTimer: 1500,
         }));
       }
-      } else {
-        const target = gameState.level2.terminalTarget;
-        if (!target) return;
+    } else {
+      const target = gameState.level2.terminalTarget;
+      if (!target) return;
 
-        if (target === "robot") {
-          if (enteredValue === gameState.level2.displayNumber1) {
-            // Запускаем анимацию тока по красному проводу к роботу
-            setGameState((prev) => ({
-              ...prev,
-              showTerminal: false,
-              terminalInput: "",
-              terminalMessage: "",
-              terminalMessageType: "",
-              level2: {
-                ...prev.level2,
-                terminalTarget: null,
-                wireAnimationActive: "robot",
-                wireAnimationProgress: 0,
-                wireParticles: [],
-              },
-            }));
-          } else if (enteredValue === gameState.level2.displayNumber2) {
-            // Запускаем анимацию тока по синему проводу к барьеру (ошибка - барьер отключится)
-            setGameState((prev) => ({
-              ...prev,
-              showTerminal: false,
-              terminalInput: "",
-              level2: {
-                ...prev.level2,
-                terminalTarget: null,
-                wireAnimationActive: "barrier",
-                wireAnimationProgress: 0,
-                wireParticles: [],
-              },
-            }));
-          } else {
-            setGameState((prev) => ({
-              ...prev,
-              terminalMessage: "Неверный код! Проверь числа на дисплеях.",
-              terminalMessageType: "error",
-              errorMessageTimer: 1500,
-            }));
-          }
-        } else if (target === "barrier") {
-          if (enteredValue === gameState.level2.displayNumber2) {
-            // Запускаем анимацию тока по синему проводу к барьеру
-            setGameState((prev) => ({
-              ...prev,
-              showTerminal: false,
-              terminalInput: "",
-              terminalMessage: "",
-              terminalMessageType: "",
-              level2: {
-                ...prev.level2,
-                terminalTarget: null,
-                wireAnimationActive: "barrier",
-                wireAnimationProgress: 0,
-                wireParticles: [],
-              },
-            }));
-          } else if (enteredValue === gameState.level2.displayNumber1) {
-            setGameState((prev) => ({
-              ...prev,
-              terminalMessage: "Это код робота, а не барьера!",
-              terminalMessageType: "error",
-              errorMessageTimer: 1500,
-            }));
-          } else {
-            setGameState((prev) => ({
-              ...prev,
-              terminalMessage: "Неверный код! Проверь числа на дисплеях.",
-              terminalMessageType: "error",
-              errorMessageTimer: 1500,
-            }));
-          }
+      if (target === "robot") {
+        if (enteredValue === gameState.level2.displayNumber1) {
+          // Запускаем анимацию тока по красному проводу к роботу
+          setGameState((prev) => ({
+            ...prev,
+            showTerminal: false,
+            terminalInput: "",
+            terminalMessage: "",
+            terminalMessageType: "",
+            level2: {
+              ...prev.level2,
+              terminalTarget: null,
+              wireAnimationActive: "robot",
+              wireAnimationProgress: 0,
+              wireParticles: [],
+            },
+          }));
+        } else if (enteredValue === gameState.level2.displayNumber2) {
+          // Запускаем анимацию тока по синему проводу к барьеру (ошибка - барьер отключится)
+          setGameState((prev) => ({
+            ...prev,
+            showTerminal: false,
+            terminalInput: "",
+            level2: {
+              ...prev.level2,
+              terminalTarget: null,
+              wireAnimationActive: "barrier",
+              wireAnimationProgress: 0,
+              wireParticles: [],
+            },
+          }));
+        } else {
+          setGameState((prev) => ({
+            ...prev,
+            terminalMessage: "Неверный код! Проверь числа на дисплеях.",
+            terminalMessageType: "error",
+            errorMessageTimer: 1500,
+          }));
+        }
+      } else if (target === "barrier") {
+        if (enteredValue === gameState.level2.displayNumber2) {
+          // Запускаем анимацию тока по синему проводу к барьеру
+          setGameState((prev) => ({
+            ...prev,
+            showTerminal: false,
+            terminalInput: "",
+            terminalMessage: "",
+            terminalMessageType: "",
+            level2: {
+              ...prev.level2,
+              terminalTarget: null,
+              wireAnimationActive: "barrier",
+              wireAnimationProgress: 0,
+              wireParticles: [],
+            },
+          }));
+        } else if (enteredValue === gameState.level2.displayNumber1) {
+          setGameState((prev) => ({
+            ...prev,
+            terminalMessage: "Это код робота, а не барьера!",
+            terminalMessageType: "error",
+            errorMessageTimer: 1500,
+          }));
+        } else {
+          setGameState((prev) => ({
+            ...prev,
+            terminalMessage: "Неверный код! Проверь числа на дисплеях.",
+            terminalMessageType: "error",
+            errorMessageTimer: 1500,
+          }));
         }
       }
+    }
   }, [gameState.terminalInput, gameState.targetNumber, gameState.currentLevel, gameState.level2.terminalTarget, gameState.level2.displayNumber1, gameState.level2.displayNumber2]);
 
   // ==================== KEYBOARD HANDLING ====================
@@ -464,10 +464,11 @@ export default function Home() {
 
     } else {
       // ==================== LEVEL 2 RENDERING ====================
+      // ГЕНЕРАТОР СПРАВА, ПРОВОДА ИДУТ СНИЗУ
 
       const genHeight = 120;
       
-      // Генератор
+      // Генератор (большой блок справа с дисплеями)
       drawGenerator(
         ctx,
         generatorPos,
@@ -477,21 +478,24 @@ export default function Home() {
         gameState.level2.displayNumber2
       );
       
-      // Провода
+      // Провода идут СНИЗУ от генератора
+      // Красный провод: генератор → вниз → по полу влево → вверх к роботу
       const redWirePoints: Position[] = [
-        { x: generatorPos.x + 37, y: generatorPos.y + genHeight },
-        { x: generatorPos.x + 37, y: groundY - 20 },
-        { x: combatRobotPos.x + COMBAT_ROBOT_WIDTH / 2, y: groundY - 20 },
-        { x: combatRobotPos.x + COMBAT_ROBOT_WIDTH / 2, y: combatRobotPos.y + COMBAT_ROBOT_HEIGHT },
+        { x: generatorPos.x + 37, y: generatorPos.y + genHeight }, // низ генератора (красный дисплей)
+        { x: generatorPos.x + 37, y: groundY - 20 }, // вниз к полу
+        { x: combatRobotPos.x + COMBAT_ROBOT_WIDTH / 2, y: groundY - 20 }, // по полу к роботу
+        { x: combatRobotPos.x + COMBAT_ROBOT_WIDTH / 2, y: combatRobotPos.y + COMBAT_ROBOT_HEIGHT }, // вверх к роботу
       ];
       
+      // Синий провод: генератор → вниз → по полу влево → в землю (устройство барьера)
       const blueWirePoints: Position[] = [
-        { x: generatorPos.x + 102, y: generatorPos.y + genHeight },
-        { x: generatorPos.x + 102, y: groundY - 40 },
-        { x: barrierX + 10, y: groundY - 40 },
-        { x: barrierX + 10, y: groundY },
+        { x: generatorPos.x + 102, y: generatorPos.y + genHeight }, // низ генератора (синий дисплей)
+        { x: generatorPos.x + 102, y: groundY - 40 }, // вниз
+        { x: barrierX + 10, y: groundY - 40 }, // по полу к барьеру
+        { x: barrierX + 10, y: groundY }, // в землю
       ];
 
+      // Рисуем провода
       drawWires(ctx, redWirePoints, blueWirePoints, gameState.level2.combatRobotDisabled, gameState.level2.barrierActive);
 
       // Анимация тока по проводам
@@ -501,7 +505,7 @@ export default function Home() {
         drawWireAnimation(ctx, wirePoints, wireColor, gameState.level2.wireAnimationProgress);
       }
 
-      // Терминал Level 2
+      // Терминал Level 2 (такой же как Level 1 - синий корпус с мигающим курсором)
       const showTerminal2Hint = isNearTerminal(gameState.playerPos.x, gameState.playerPos.y, 2) &&
         gameState.spawnPhase === "ready" &&
         !gameState.level2.playerDead &&
@@ -509,7 +513,7 @@ export default function Home() {
         gameState.level2.wireAnimationActive === "none";
       drawTerminal(ctx, level2TerminalPos, TERMINAL_WIDTH, TERMINAL_HEIGHT, showTerminal2Hint);
 
-      // Барьер
+      // Барьер (энергетический щит)
       if (gameState.level2.barrierActive) {
         drawBarrier(ctx, barrierX, groundY, gameState.level2.barrierTimeLeft, BARRIER_MAX_TIME, gameState.level2.combatRobotDisabled);
       }
@@ -517,7 +521,7 @@ export default function Home() {
       // Пули
       drawBullets(ctx, gameState.level2.bullets, BULLET_WIDTH, BULLET_HEIGHT);
 
-      // Боевой робот
+      // Боевой робот (позиция x=500, левее генератора)
       drawCombatRobot(
         ctx,
         combatRobotPos.x,
@@ -652,27 +656,27 @@ export default function Home() {
                   <p className="font-mono text-green-400">13₍₁₀₎ = 1101₍₂₎</p>
                 </div>
               </>
-              ) : (
-                <>
-                  <p className="mb-3 text-sm text-red-300">
-                    Боевой робот атакует! Барьер защищает тебя, но ненадолго.
+            ) : (
+              <>
+                <p className="mb-3 text-sm text-red-300">
+                  Боевой робот атакует! Барьер защищает тебя, но ненадолго.
+                </p>
+                <p className="mb-3 text-sm">
+                  Справа генератор с двумя числами. Введи число в терминал — ток пойдёт по проводу и отключит цель.
+                </p>
+                <div className="rounded bg-slate-700 p-2 text-xs mb-2">
+                  <p className="text-red-400">
+                    <span className="font-bold">{gameState.level2.combatRobotDisabled ? "---" : gameState.level2.displayNumber1}</span> — красный → РОБОТ
                   </p>
-                  <p className="mb-3 text-sm">
-                    Справа генератор с двумя числами. Введи число в терминал — ток пойдёт по проводу и отключит цель.
+                  <p className="text-blue-400">
+                    <span className="font-bold">{!gameState.level2.barrierActive ? "---" : gameState.level2.displayNumber2}</span> — синий → БАРЬЕР
                   </p>
-                  <div className="rounded bg-slate-700 p-2 text-xs mb-2">
-                    <p className="text-red-400">
-                      <span className="font-bold">{gameState.level2.combatRobotDisabled ? "---" : gameState.level2.displayNumber1}</span> — красный → РОБОТ
-                    </p>
-                    <p className="text-blue-400">
-                      <span className="font-bold">{!gameState.level2.barrierActive ? "---" : gameState.level2.displayNumber2}</span> — синий → БАРЬЕР
-                    </p>
-                  </div>
-                  <p className="text-xs text-yellow-300">
-                    Подсказка: сначала отключи угрозу, потом — защиту!
-                  </p>
-                </>
-              )}
+                </div>
+                <p className="text-xs text-yellow-300">
+                  Подсказка: сначала отключи угрозу, потом — защиту!
+                </p>
+              </>
+            )}
             <div className="mt-3 text-xs text-slate-400">
               <p>A/D или ←/→ — движение</p>
               <p>Space — прыжок</p>
