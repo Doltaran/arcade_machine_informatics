@@ -1,130 +1,51 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback } from "react";
+import type { Position, SpawnParticle, GameState } from "@/game/types";
+import {
+  drawAstronaut,
+  drawCombatRobot,
+  drawSparks,
+  drawCombatSparks,
+  drawSpawnParticles,
+  drawBackground,
+  drawExit,
+  drawTerminal,
+  drawStartZone,
+  drawLevel1Robot,
+  drawGenerator,
+  drawWires,
+  drawWireAnimation,
+  drawBarrier,
+  drawBullets,
+  drawSpawnBeam,
+  drawMaterializeRing,
+  drawLevelLabel,
+} from "@/game/render";
+import {
+  updateGame,
+  CANVAS_WIDTH,
+  CANVAS_HEIGHT,
+  PLAYER_WIDTH,
+  PLAYER_HEIGHT,
+  ROBOT_WIDTH,
+  ROBOT_HEIGHT,
+  EXIT_WIDTH,
+  EXIT_HEIGHT,
+  GROUND_HEIGHT,
+  BARRIER_MAX_TIME,
+  BULLET_WIDTH,
+  BULLET_HEIGHT,
+  COMBAT_ROBOT_WIDTH,
+  COMBAT_ROBOT_HEIGHT,
+  type InputState,
+  type WorldConfig,
+} from "@/game/engine";
 
-// ==================== GAME CONSTANTS ====================
-const CANVAS_WIDTH = 1400;
-const CANVAS_HEIGHT = 900;
-const PLAYER_WIDTH = 36;
-const PLAYER_HEIGHT = 52;
-const PLAYER_SPEED = 1;
-const JUMP_FORCE = 8;
-const GRAVITY = 0.6;
-const ROBOT_WIDTH = 60;
-const ROBOT_HEIGHT = 80;
+// ==================== LOCAL CONSTANTS ====================
 const TERMINAL_WIDTH = 50;
 const TERMINAL_HEIGHT = 60;
-const EXIT_WIDTH = 60;
-const EXIT_HEIGHT = 90;
-const GROUND_HEIGHT = 80;
 const INTERACTION_DISTANCE = 70;
-
-// Level 2 constants
-const BARRIER_MAX_TIME = 15000; // 15 seconds barrier duration
-const BULLET_SPEED = 4;
-const BULLET_WIDTH = 20;
-const BULLET_HEIGHT = 8;
-const COMBAT_ROBOT_WIDTH = 80;
-const COMBAT_ROBOT_HEIGHT = 100;
-const SHOOT_INTERVAL = 1200; // ms between shots
-
-// ==================== GAME STATE TYPES ====================
-interface Position {
-  x: number;
-  y: number;
-}
-
-interface Spark {
-  x: number;
-  y: number;
-  vx: number;
-  vy: number;
-  life: number;
-}
-
-interface SpawnParticle {
-  x: number;
-  y: number;
-  vx: number;
-  vy: number;
-  life: number;
-  size: number;
-  color: string;
-}
-
-interface Bullet {
-  x: number;
-  y: number;
-  vx: number;
-}
-
-interface NarratorMessage {
-  text: string;
-  duration: number;
-  timer: number;
-}
-
-// Электрическая частица для анимации провода
-interface WireParticle {
-  x: number;
-  y: number;
-  progress: number; // 0-1 прогресс по проводу
-  color: string;
-}
-
-interface GameState {
-  currentLevel: number;
-  playerPos: Position;
-  playerVelocityY: number;
-  isGrounded: boolean;
-  isMoving: boolean;
-  facingRight: boolean;
-  animationTime: number;
-  robotDisabled: boolean;
-  robotColliderActive: boolean;
-  targetNumber: number;
-  showTerminal: boolean;
-  terminalInput: string;
-  terminalMessage: string;
-  terminalMessageType: "error" | "success" | "";
-  errorMessageTimer: number;
-  levelComplete: boolean;
-  levelCompletePhase: "none" | "fadeIn" | "hold" | "fadeOut" | "showButton" | "transition";
-  levelCompleteOpacity: number;
-  currentGoal: string;
-  taskPanelExpanded: boolean;
-  robotAnimationPhase: "none" | "flashing" | "sparks" | "collapse" | "done";
-  robotFlashCount: number;
-  robotFlashOn: boolean;
-  robotCollapseOffset: number;
-  sparks: Spark[];
-  spawnPhase: "beam" | "materialize" | "ready";
-  spawnProgress: number;
-  spawnParticles: SpawnParticle[];
-  level2: {
-    combatRobotDisabled: boolean;
-    combatRobotAnimPhase: "none" | "flashing" | "sparks" | "collapse" | "done";
-    combatRobotFlashCount: number;
-    combatRobotCollapseOffset: number;
-    barrierActive: boolean;
-    barrierAnimPhase: "none" | "disabling" | "done";
-    barrierTimeLeft: number;
-    bullets: Bullet[];
-    shootTimer: number;
-    displayNumber1: number;
-    displayNumber2: number;
-    playerDead: boolean;
-    deathReason: string;
-    narratorMessage: NarratorMessage | null;
-    narratorShown: boolean;
-    terminalTarget: "robot" | "barrier" | null;
-    sparks: Spark[];
-    // Анимация тока по проводам
-    wireAnimationActive: "none" | "robot" | "barrier";
-    wireAnimationProgress: number;
-    wireParticles: WireParticle[];
-  };
-}
 
 // ==================== MAIN COMPONENT ====================
 export default function Home() {
@@ -463,6 +384,16 @@ export default function Home() {
     handleTerminalSubmit,
   ]);
 
+  // ==================== WORLD CONFIG ====================
+  const worldConfig: WorldConfig = {
+    robotPos,
+    exitPos,
+    combatRobotPos,
+    level2ExitPos,
+    barrierX,
+    groundY,
+  };
+
   // ==================== GAME LOOP ====================
   useEffect(() => {
     let lastTime = performance.now();
@@ -471,407 +402,14 @@ export default function Home() {
       const deltaTime = Math.min(currentTime - lastTime, 50);
       lastTime = currentTime;
 
-      setGameState((prev) => {
-        if (prev.showTerminal) {
-          return prev;
-        }
+      // Build input state from keysPressed
+      const input: InputState = {
+        left: keysPressed.current.has("a") || keysPressed.current.has("arrowleft") || keysPressed.current.has("ф"),
+        right: keysPressed.current.has("d") || keysPressed.current.has("arrowright") || keysPressed.current.has("в"),
+        jump: keysPressed.current.has(" "),
+      };
 
-        let newState = { ...prev, level2: { ...prev.level2 } };
-
-        // ==================== SPAWN ANIMATION ====================
-        if (newState.spawnPhase === "beam") {
-          newState.spawnProgress += deltaTime / 800;
-          newState.spawnParticles = newState.spawnParticles
-            .map((p) => ({
-              ...p,
-              x: p.x + p.vx * 0.5,
-              y: p.y + p.vy * 0.5 - 1,
-              life: p.life - deltaTime / 1000,
-            }))
-            .filter((p) => p.life > 0);
-
-          if (newState.spawnProgress >= 1) {
-            newState.spawnPhase = "materialize";
-            newState.spawnProgress = 0;
-          }
-        } else if (newState.spawnPhase === "materialize") {
-          newState.spawnProgress += deltaTime / 600;
-          if (newState.spawnProgress >= 1) {
-            newState.spawnPhase = "ready";
-            newState.spawnProgress = 1;
-          }
-        }
-
-        // ==================== ERROR MESSAGE TIMER ====================
-        if (newState.errorMessageTimer > 0) {
-          newState.errorMessageTimer -= deltaTime;
-          if (newState.errorMessageTimer <= 0) {
-            newState.terminalMessage = "";
-            newState.terminalMessageType = "";
-          }
-        }
-
-        // ==================== NARRATOR MESSAGE TIMER (Level 2) ====================
-        if (newState.level2.narratorMessage) {
-          newState.level2.narratorMessage = {
-            ...newState.level2.narratorMessage,
-            timer: newState.level2.narratorMessage.timer - deltaTime,
-          };
-          if (newState.level2.narratorMessage.timer <= 0) {
-            newState.level2.narratorMessage = null;
-          }
-        }
-
-        // ==================== LEVEL 1 ROBOT ANIMATION ====================
-        if (newState.currentLevel === 1) {
-          if (newState.robotAnimationPhase === "flashing") {
-            const flashInterval = 100;
-            const totalFlashes = 6;
-            newState.robotFlashCount += deltaTime / flashInterval;
-            newState.robotFlashOn = Math.floor(newState.robotFlashCount) % 2 === 0;
-            if (newState.robotFlashCount >= totalFlashes) {
-              newState.robotAnimationPhase = "sparks";
-              newState.robotFlashOn = false;
-              const newSparks: Spark[] = [];
-              for (let i = 0; i < 12; i++) {
-                newSparks.push({
-                  x: robotPos.x + ROBOT_WIDTH / 2 + (Math.random() - 0.5) * 40,
-                  y: robotPos.y + 20 + Math.random() * 30,
-                  vx: (Math.random() - 0.5) * 8,
-                  vy: -Math.random() * 6 - 2,
-                  life: 1,
-                });
-              }
-              newState.sparks = newSparks;
-            }
-          } else if (newState.robotAnimationPhase === "sparks") {
-            const updatedSparks = newState.sparks
-              .map((s) => ({
-                ...s,
-                x: s.x + s.vx,
-                y: s.y + s.vy,
-                vy: s.vy + 0.3,
-                life: s.life - deltaTime / 500,
-              }))
-              .filter((s) => s.life > 0);
-            newState.sparks = updatedSparks;
-            if (updatedSparks.length === 0) {
-              newState.robotAnimationPhase = "collapse";
-            }
-          } else if (newState.robotAnimationPhase === "collapse") {
-            newState.robotCollapseOffset += deltaTime * 0.05;
-            if (newState.robotCollapseOffset >= 15) {
-              newState.robotCollapseOffset = 15;
-              newState.robotAnimationPhase = "done";
-              newState.robotColliderActive = false;
-            }
-          }
-        }
-
-          // ==================== LEVEL 2 COMBAT ROBOT ANIMATION ====================
-          if (newState.currentLevel === 2) {
-            // ==================== WIRE ANIMATION ====================
-            if (newState.level2.wireAnimationActive !== "none") {
-              newState.level2.wireAnimationProgress += deltaTime / 1000; // 1 секунда на анимацию
-              
-              // Добавляем частицы тока
-              if (Math.random() < 0.3) {
-                const color = newState.level2.wireAnimationActive === "robot" ? "#ef4444" : "#3b82f6";
-                newState.level2.wireParticles = [
-                  ...newState.level2.wireParticles,
-                  {
-                    x: 0,
-                    y: 0,
-                    progress: newState.level2.wireAnimationProgress - Math.random() * 0.1,
-                    color,
-                  },
-                ];
-              }
-              
-              // Убираем старые частицы
-              newState.level2.wireParticles = newState.level2.wireParticles.filter(
-                (p) => p.progress < newState.level2.wireAnimationProgress + 0.1
-              );
-              
-              // Когда анимация завершена
-              if (newState.level2.wireAnimationProgress >= 1) {
-                if (newState.level2.wireAnimationActive === "robot") {
-                  // Отключаем робота
-                  newState.level2.combatRobotDisabled = true;
-                  newState.level2.combatRobotAnimPhase = "flashing";
-                  newState.level2.combatRobotFlashCount = 0;
-                  newState.currentGoal = "Теперь отключи барьер (синий провод)";
-                  newState.level2.narratorMessage = {
-                    text: "Отлично! Робот отключён. Теперь отключи барьер, пока он не исчез!",
-                    duration: 3000,
-                    timer: 3000,
-                  };
-                } else {
-                  // Отключаем барьер
-                  newState.level2.barrierActive = false;
-                  newState.level2.barrierAnimPhase = "disabling";
-                  if (newState.level2.combatRobotDisabled) {
-                    newState.currentGoal = "Дойди до выхода!";
-                    newState.level2.narratorMessage = {
-                      text: "Барьер деактивирован. Путь свободен!",
-                      duration: 2500,
-                      timer: 2500,
-                    };
-                  }
-                  // Если робот ещё активен - пули начнут попадать в игрока
-                }
-                newState.level2.wireAnimationActive = "none";
-                newState.level2.wireAnimationProgress = 0;
-                newState.level2.wireParticles = [];
-              }
-            }
-
-            if (newState.level2.combatRobotAnimPhase === "flashing") {
-              const flashInterval = 100;
-              const totalFlashes = 6;
-              newState.level2.combatRobotFlashCount += deltaTime / flashInterval;
-              if (newState.level2.combatRobotFlashCount >= totalFlashes) {
-                newState.level2.combatRobotAnimPhase = "sparks";
-                const newSparks: Spark[] = [];
-                for (let i = 0; i < 15; i++) {
-                  newSparks.push({
-                    x: combatRobotPos.x + COMBAT_ROBOT_WIDTH / 2 + (Math.random() - 0.5) * 50,
-                    y: combatRobotPos.y + 30 + Math.random() * 40,
-                    vx: (Math.random() - 0.5) * 10,
-                    vy: -Math.random() * 8 - 2,
-                    life: 1,
-                  });
-                }
-                newState.level2.sparks = newSparks;
-              }
-            } else if (newState.level2.combatRobotAnimPhase === "sparks") {
-              const updatedSparks = newState.level2.sparks
-                .map((s) => ({
-                  ...s,
-                  x: s.x + s.vx,
-                  y: s.y + s.vy,
-                  vy: s.vy + 0.3,
-                  life: s.life - deltaTime / 500,
-                }))
-                .filter((s) => s.life > 0);
-              newState.level2.sparks = updatedSparks;
-              if (updatedSparks.length === 0) {
-                newState.level2.combatRobotAnimPhase = "collapse";
-              }
-            } else if (newState.level2.combatRobotAnimPhase === "collapse") {
-              newState.level2.combatRobotCollapseOffset += deltaTime * 0.04;
-              if (newState.level2.combatRobotCollapseOffset >= 25) {
-                newState.level2.combatRobotCollapseOffset = 25;
-                newState.level2.combatRobotAnimPhase = "done";
-              }
-            }
-
-            // ==================== LEVEL 2 SHOOTING & BARRIER ====================
-            if (!newState.level2.combatRobotDisabled && newState.spawnPhase === "ready" && !newState.level2.playerDead) {
-              // Робот стреляет
-              newState.level2.shootTimer += deltaTime;
-              if (newState.level2.shootTimer >= SHOOT_INTERVAL) {
-                newState.level2.shootTimer = 0;
-                newState.level2.bullets = [
-                  ...newState.level2.bullets,
-                  {
-                    x: combatRobotPos.x - BULLET_WIDTH,
-                    y: combatRobotPos.y + COMBAT_ROBOT_HEIGHT / 2 - BULLET_HEIGHT / 2,
-                    vx: -BULLET_SPEED,
-                  },
-                ];
-              }
-            }
-
-            // Обновляем пули (всегда, даже если робот отключён - для пуль в воздухе)
-            newState.level2.bullets = newState.level2.bullets
-              .map((b) => ({ ...b, x: b.x + b.vx }))
-              .filter((b) => b.x > -BULLET_WIDTH);
-
-            // Проверяем столкновение пуль с барьером или игроком
-            if (newState.level2.barrierActive) {
-              // Пули останавливаются на барьере
-              newState.level2.bullets = newState.level2.bullets.filter((b) => b.x > barrierX);
-            } else if (!newState.level2.playerDead) {
-              // Проверяем попадание в игрока
-              const playerRect = {
-                left: newState.playerPos.x,
-                right: newState.playerPos.x + PLAYER_WIDTH,
-                top: newState.playerPos.y,
-                bottom: newState.playerPos.y + PLAYER_HEIGHT,
-              };
-              for (const bullet of newState.level2.bullets) {
-                if (
-                  bullet.x < playerRect.right &&
-                  bullet.x + BULLET_WIDTH > playerRect.left &&
-                  bullet.y < playerRect.bottom &&
-                  bullet.y + BULLET_HEIGHT > playerRect.top
-                ) {
-                  newState.level2.playerDead = true;
-                  newState.level2.deathReason = "Ты был поражён пулей боевого робота!";
-                  break;
-                }
-              }
-            }
-
-            // Уменьшаем время барьера (только если робот ещё активен)
-            if (newState.level2.barrierActive && !newState.level2.combatRobotDisabled) {
-              newState.level2.barrierTimeLeft -= deltaTime;
-              if (newState.level2.barrierTimeLeft <= 0) {
-                newState.level2.barrierActive = false;
-                newState.level2.barrierTimeLeft = 0;
-              }
-            }
-          }
-
-        // ==================== LEVEL COMPLETE ANIMATION ====================
-        if (newState.levelCompletePhase === "fadeIn") {
-          newState.levelCompleteOpacity += deltaTime / 250;
-          if (newState.levelCompleteOpacity >= 1) {
-            newState.levelCompleteOpacity = 1;
-            newState.levelCompletePhase = "hold";
-          }
-        } else if (newState.levelCompletePhase === "hold") {
-          newState.robotFlashCount += deltaTime;
-          if (newState.robotFlashCount >= 1200) {
-            newState.levelCompletePhase = "fadeOut";
-            newState.robotFlashCount = 0;
-          }
-        } else if (newState.levelCompletePhase === "fadeOut") {
-          newState.levelCompleteOpacity -= deltaTime / 500;
-          if (newState.levelCompleteOpacity <= 0) {
-            newState.levelCompleteOpacity = 0;
-            if (newState.currentLevel === 1) {
-              newState.levelCompletePhase = "transition";
-            } else {
-              newState.levelCompletePhase = "showButton";
-            }
-          }
-        }
-
-        if (newState.levelComplete || newState.level2.playerDead) {
-          return newState;
-        }
-
-        if (newState.spawnPhase !== "ready") {
-          return newState;
-        }
-
-        // ==================== PLAYER PHYSICS ====================
-        let newX = newState.playerPos.x;
-        let newY = newState.playerPos.y;
-        let newVelY = newState.playerVelocityY;
-        let grounded = newState.isGrounded;
-        let moving = false;
-        let facingRight = newState.facingRight;
-
-        newState.animationTime += deltaTime;
-
-        if (
-          keysPressed.current.has("a") ||
-          keysPressed.current.has("arrowleft") ||
-          keysPressed.current.has("ф")
-        ) {
-          newX -= PLAYER_SPEED;
-          moving = true;
-          facingRight = false;
-        }
-        if (
-          keysPressed.current.has("d") ||
-          keysPressed.current.has("arrowright") ||
-          keysPressed.current.has("в")
-        ) {
-          newX += PLAYER_SPEED;
-          moving = true;
-          facingRight = true;
-        }
-
-        if (keysPressed.current.has(" ") && grounded) {
-          newVelY = -JUMP_FORCE;
-          grounded = false;
-        }
-
-        newVelY += GRAVITY;
-        newY += newVelY;
-
-        if (newY + PLAYER_HEIGHT >= groundY) {
-          newY = groundY - PLAYER_HEIGHT;
-          newVelY = 0;
-          grounded = true;
-        }
-
-        if (newX < 0) newX = 0;
-        if (newX + PLAYER_WIDTH > CANVAS_WIDTH) newX = CANVAS_WIDTH - PLAYER_WIDTH;
-
-          // ==================== LEVEL 1 ROBOT COLLIDER ====================
-          if (newState.currentLevel === 1 && newState.robotColliderActive) {
-            const playerRect = {
-              left: newX,
-              right: newX + PLAYER_WIDTH,
-              top: newY,
-              bottom: newY + PLAYER_HEIGHT,
-            };
-            const robotRect = {
-              left: robotPos.x,
-              right: robotPos.x + ROBOT_WIDTH,
-              top: robotPos.y,
-              bottom: robotPos.y + ROBOT_HEIGHT,
-            };
-
-            if (
-              playerRect.left < robotRect.right &&
-              playerRect.right > robotRect.left &&
-              playerRect.top < robotRect.bottom &&
-              playerRect.bottom > robotRect.top
-            ) {
-              if (newState.playerPos.x < robotPos.x) {
-                newX = robotRect.left - PLAYER_WIDTH;
-              } else {
-                newX = robotRect.right;
-              }
-            }
-          }
-
-          // ==================== LEVEL 2 BARRIER COLLIDER ====================
-          if (newState.currentLevel === 2 && newState.level2.barrierActive) {
-            // Игрок не может пройти через барьер
-            if (newX + PLAYER_WIDTH > barrierX - 10 && newState.playerPos.x + PLAYER_WIDTH <= barrierX - 10) {
-              newX = barrierX - 10 - PLAYER_WIDTH;
-            }
-            if (newX < barrierX + 30 && newState.playerPos.x >= barrierX + 30) {
-              newX = barrierX + 30;
-            }
-          }
-
-          // ==================== CHECK EXIT ====================
-        const currentExitPos = newState.currentLevel === 1 ? exitPos : level2ExitPos;
-        const canExit = newState.currentLevel === 1
-          ? !newState.robotColliderActive
-          : newState.level2.combatRobotDisabled && !newState.level2.barrierActive;
-
-        if (canExit) {
-          const playerCenter = { x: newX + PLAYER_WIDTH / 2, y: newY + PLAYER_HEIGHT / 2 };
-          if (
-            playerCenter.x > currentExitPos.x &&
-            playerCenter.x < currentExitPos.x + EXIT_WIDTH &&
-            playerCenter.y > currentExitPos.y &&
-            playerCenter.y < currentExitPos.y + EXIT_HEIGHT
-          ) {
-            newState.levelComplete = true;
-            newState.levelCompletePhase = "fadeIn";
-            newState.levelCompleteOpacity = 0;
-            newState.robotFlashCount = 0;
-          }
-        }
-
-        newState.playerPos = { x: newX, y: newY };
-        newState.playerVelocityY = newVelY;
-        newState.isGrounded = grounded;
-        newState.isMoving = moving;
-        newState.facingRight = facingRight;
-
-        return newState;
-      });
+      setGameState((prev) => updateGame(prev, input, deltaTime, worldConfig));
 
       animationFrameRef.current = requestAnimationFrame(gameLoop);
     };
@@ -881,223 +419,7 @@ export default function Home() {
     return () => {
       cancelAnimationFrame(animationFrameRef.current);
     };
-  }, [robotPos, exitPos, combatRobotPos, level2ExitPos, groundY, barrierX, generatorPos]);
-
-  // ==================== DRAW ASTRONAUT ====================
-  const drawAstronaut = (
-    ctx: CanvasRenderingContext2D,
-    x: number,
-    y: number,
-    facingRight: boolean,
-    isMoving: boolean,
-    isGrounded: boolean,
-    animTime: number,
-    spawnPhase: string,
-    spawnProgress: number
-  ) => {
-    const dir = facingRight ? 1 : -1;
-    const centerX = x + PLAYER_WIDTH / 2;
-
-    const walkCycle = isMoving && isGrounded ? Math.sin(animTime * 0.015) : 0;
-    const armSwing = walkCycle * 25;
-    const legSwing = walkCycle * 20;
-
-    let alpha = 1;
-    if (spawnPhase === "materialize") {
-      alpha = spawnProgress;
-    } else if (spawnPhase === "beam") {
-      alpha = 0;
-    }
-
-    ctx.save();
-    ctx.globalAlpha = alpha;
-
-    // Ноги
-    ctx.save();
-    ctx.translate(centerX - 6, y + 38);
-    ctx.rotate(((-legSwing) * Math.PI) / 180);
-    ctx.fillStyle = "#1e40af";
-    ctx.fillRect(-4, 0, 8, 10);
-    ctx.fillStyle = "#1e3a8a";
-    ctx.fillRect(-4, 10, 8, 8);
-    ctx.fillStyle = "#374151";
-    ctx.beginPath();
-    ctx.roundRect(-5, 18, 10, 6, 2);
-    ctx.fill();
-    ctx.restore();
-
-    ctx.save();
-    ctx.translate(centerX + 6, y + 38);
-    ctx.rotate((legSwing * Math.PI) / 180);
-    ctx.fillStyle = "#1e40af";
-    ctx.fillRect(-4, 0, 8, 10);
-    ctx.fillStyle = "#1e3a8a";
-    ctx.fillRect(-4, 10, 8, 8);
-    ctx.fillStyle = "#374151";
-    ctx.beginPath();
-    ctx.roundRect(-5, 18, 10, 6, 2);
-    ctx.fill();
-    ctx.restore();
-
-    // Тело
-    ctx.fillStyle = "#f5f5f5";
-    ctx.beginPath();
-    ctx.roundRect(centerX - 10, y + 18, 20, 22, 4);
-    ctx.fill();
-
-    ctx.fillStyle = "#e5e5e5";
-    ctx.fillRect(centerX - 6, y + 22, 12, 14);
-
-    ctx.fillStyle = "#22c55e";
-    ctx.beginPath();
-    ctx.arc(centerX - 2, y + 26, 2, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = "#3b82f6";
-    ctx.beginPath();
-    ctx.arc(centerX + 3, y + 26, 2, 0, Math.PI * 2);
-    ctx.fill();
-
-    ctx.fillStyle = "#6b7280";
-    ctx.fillRect(centerX - 10, y + 36, 20, 4);
-
-    // Руки
-    ctx.save();
-    ctx.translate(centerX - 12, y + 22);
-    ctx.rotate((armSwing * Math.PI) / 180);
-    ctx.fillStyle = "#f5f5f5";
-    ctx.beginPath();
-    ctx.roundRect(-4, 0, 8, 12, 3);
-    ctx.fill();
-    ctx.fillStyle = "#d4d4d4";
-    ctx.beginPath();
-    ctx.roundRect(-3, 12, 6, 6, 2);
-    ctx.fill();
-    ctx.restore();
-
-    ctx.save();
-    ctx.translate(centerX + 12, y + 22);
-    ctx.rotate(((-armSwing) * Math.PI) / 180);
-    ctx.fillStyle = "#f5f5f5";
-    ctx.beginPath();
-    ctx.roundRect(-4, 0, 8, 12, 3);
-    ctx.fill();
-    ctx.fillStyle = "#d4d4d4";
-    ctx.beginPath();
-    ctx.roundRect(-3, 12, 6, 6, 2);
-    ctx.fill();
-    ctx.restore();
-
-    // Шлем
-    ctx.fillStyle = "#f5f5f5";
-    ctx.beginPath();
-    ctx.arc(centerX, y + 12, 12, 0, Math.PI * 2);
-    ctx.fill();
-
-    ctx.fillStyle = "#1e3a8a";
-    ctx.beginPath();
-    ctx.arc(centerX + dir * 2, y + 12, 9, 0, Math.PI * 2);
-    ctx.fill();
-
-    ctx.fillStyle = "rgba(147, 197, 253, 0.5)";
-    ctx.beginPath();
-    ctx.arc(centerX + dir * 5, y + 9, 3, 0, Math.PI * 2);
-    ctx.fill();
-
-    ctx.fillStyle = "rgba(255, 255, 255, 0.7)";
-    ctx.beginPath();
-    ctx.arc(centerX + dir * 3, y + 7, 1.5, 0, Math.PI * 2);
-    ctx.fill();
-
-    ctx.strokeStyle = "#9ca3af";
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(centerX - 8, y + 4);
-    ctx.lineTo(centerX - 10, y - 4);
-    ctx.stroke();
-    ctx.fillStyle = "#ef4444";
-    ctx.beginPath();
-    ctx.arc(centerX - 10, y - 5, 2, 0, Math.PI * 2);
-    ctx.fill();
-
-    ctx.fillStyle = "#d4d4d4";
-    ctx.beginPath();
-    ctx.roundRect(centerX - dir * 14, y + 20, 6, 16, 2);
-    ctx.fill();
-
-    ctx.restore();
-  };
-
-  // ==================== DRAW COMBAT ROBOT (Level 2) ====================
-  const drawCombatRobot = (
-    ctx: CanvasRenderingContext2D,
-    x: number,
-    y: number,
-    disabled: boolean,
-    animPhase: string,
-    flashCount: number,
-    collapseOffset: number
-  ) => {
-    const robotY = y + collapseOffset;
-    let bodyColor = "#dc2626";
-    
-    if (animPhase === "flashing") {
-      bodyColor = Math.floor(flashCount) % 2 === 0 ? "#fef08a" : "#dc2626";
-    } else if (disabled && animPhase !== "flashing") {
-      bodyColor = "#4b5563";
-    }
-
-    // Тело
-    ctx.fillStyle = bodyColor;
-    ctx.beginPath();
-    ctx.roundRect(x, robotY, COMBAT_ROBOT_WIDTH, COMBAT_ROBOT_HEIGHT - collapseOffset, 8);
-    ctx.fill();
-
-    // Голова
-    ctx.fillStyle = bodyColor;
-    ctx.beginPath();
-    ctx.roundRect(x + 15, robotY - 25, COMBAT_ROBOT_WIDTH - 30, 30, 5);
-    ctx.fill();
-
-    // Глаза (красные лазеры когда активен)
-    const eyeColor = disabled ? "#374151" : "#ff0000";
-    ctx.fillStyle = eyeColor;
-    ctx.beginPath();
-    ctx.arc(x + 25, robotY - 10, 8, 0, Math.PI * 2);
-    ctx.arc(x + COMBAT_ROBOT_WIDTH - 25, robotY - 10, 8, 0, Math.PI * 2);
-    ctx.fill();
-
-    if (!disabled) {
-      // Свечение глаз
-      ctx.shadowColor = "#ff0000";
-      ctx.shadowBlur = 15;
-      ctx.fillStyle = "#ff6666";
-      ctx.beginPath();
-      ctx.arc(x + 25, robotY - 10, 4, 0, Math.PI * 2);
-      ctx.arc(x + COMBAT_ROBOT_WIDTH - 25, robotY - 10, 4, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.shadowBlur = 0;
-    }
-
-    // Пушка
-    ctx.fillStyle = disabled ? "#374151" : "#991b1b";
-    ctx.fillRect(x - 30, robotY + 30, 35, 15);
-    ctx.beginPath();
-    ctx.arc(x - 30, robotY + 37, 7, 0, Math.PI * 2);
-    ctx.fill();
-
-    // Ноги/гусеницы
-    ctx.fillStyle = "#1f2937";
-    ctx.fillRect(x + 5, robotY + COMBAT_ROBOT_HEIGHT - collapseOffset - 15, 25, 15);
-    ctx.fillRect(x + COMBAT_ROBOT_WIDTH - 30, robotY + COMBAT_ROBOT_HEIGHT - collapseOffset - 15, 25, 15);
-
-    // Надпись "COMBAT"
-    if (!disabled) {
-      ctx.fillStyle = "#fff";
-      ctx.font = "bold 12px Arial";
-      ctx.textAlign = "center";
-      ctx.fillText("COMBAT", x + COMBAT_ROBOT_WIDTH / 2, robotY + 50);
-    }
-  };
+  }, [worldConfig]);
 
   // ==================== RENDERING ====================
   useEffect(() => {
@@ -1107,442 +429,116 @@ export default function Home() {
     if (!ctx) return;
 
     // Фон
-    const skyGradient = ctx.createLinearGradient(0, 0, 0, groundY);
-    if (gameState.currentLevel === 1) {
-      skyGradient.addColorStop(0, "#0f172a");
-      skyGradient.addColorStop(1, "#1e293b");
-    } else {
-      skyGradient.addColorStop(0, "#1a0a0a");
-      skyGradient.addColorStop(1, "#2d1515");
-    }
-    ctx.fillStyle = skyGradient;
-    ctx.fillRect(0, 0, CANVAS_WIDTH, groundY);
-
-    // Звёзды
-    ctx.fillStyle = "#fff";
-    for (let i = 0; i < 50; i++) {
-      const starX = (i * 137) % CANVAS_WIDTH;
-      const starY = (i * 89) % (groundY - 20);
-      const starSize = (i % 3) * 0.5 + 0.5;
-      ctx.beginPath();
-      ctx.arc(starX, starY, starSize, 0, Math.PI * 2);
-      ctx.fill();
-    }
-
-    // Пол
-    ctx.fillStyle = gameState.currentLevel === 1 ? "#334155" : "#3d2020";
-    ctx.fillRect(0, groundY, CANVAS_WIDTH, GROUND_HEIGHT);
-    ctx.strokeStyle = gameState.currentLevel === 1 ? "#475569" : "#5c3030";
-    ctx.lineWidth = 3;
-    ctx.beginPath();
-    ctx.moveTo(0, groundY);
-    ctx.lineTo(CANVAS_WIDTH, groundY);
-    ctx.stroke();
-
-    ctx.fillStyle = gameState.currentLevel === 1 ? "#1e293b" : "#2a1515";
-    for (let i = 0; i < CANVAS_WIDTH; i += 60) {
-      ctx.fillRect(i + 5, groundY + 8, 50, 4);
-      ctx.fillRect(i + 10, groundY + 20, 40, 3);
-    }
+    drawBackground(ctx, CANVAS_WIDTH, groundY, GROUND_HEIGHT, gameState.currentLevel);
 
     if (gameState.currentLevel === 1) {
       // ==================== LEVEL 1 RENDERING ====================
       
       // Exit
-      const exitActive = !gameState.robotColliderActive;
-      ctx.fillStyle = exitActive ? "#22c55e" : "#4b5563";
-      ctx.fillRect(exitPos.x, exitPos.y, EXIT_WIDTH, EXIT_HEIGHT);
-      ctx.fillStyle = exitActive ? "#166534" : "#374151";
-      ctx.fillRect(exitPos.x + 10, exitPos.y + 20, EXIT_WIDTH - 20, EXIT_HEIGHT - 20);
-      ctx.fillStyle = "#fff";
-      ctx.font = "bold 14px Arial";
-      ctx.textAlign = "center";
-      ctx.fillText("EXIT", exitPos.x + EXIT_WIDTH / 2, exitPos.y + 14);
-      if (exitActive) {
-        ctx.fillStyle = "#4ade80";
-        ctx.beginPath();
-        ctx.arc(exitPos.x + EXIT_WIDTH / 2, exitPos.y - 15, 6, 0, Math.PI * 2);
-        ctx.fill();
-      }
+      drawExit(ctx, exitPos, EXIT_WIDTH, EXIT_HEIGHT, !gameState.robotColliderActive);
 
       // Terminal
-      ctx.fillStyle = "#3b82f6";
-      ctx.fillRect(terminalPos.x, terminalPos.y, TERMINAL_WIDTH, TERMINAL_HEIGHT);
-      ctx.fillStyle = "#1e3a5f";
-      ctx.fillRect(terminalPos.x + 5, terminalPos.y + 5, TERMINAL_WIDTH - 10, 30);
-      ctx.fillStyle = "#1e40af";
-      ctx.fillRect(terminalPos.x + 15, terminalPos.y + TERMINAL_HEIGHT - 15, TERMINAL_WIDTH - 30, 15);
-      if (Math.floor(Date.now() / 500) % 2 === 0) {
-        ctx.fillStyle = "#4ade80";
-        ctx.fillRect(terminalPos.x + 10, terminalPos.y + 15, 8, 12);
-      }
-      if (
-        isNearTerminal(gameState.playerPos.x, gameState.playerPos.y, 1) &&
+      const showTerminalHint = isNearTerminal(gameState.playerPos.x, gameState.playerPos.y, 1) &&
         !gameState.robotDisabled &&
-        gameState.spawnPhase === "ready"
-      ) {
-        ctx.fillStyle = "#fbbf24";
-        ctx.font = "bold 14px Arial";
-        ctx.textAlign = "center";
-        ctx.fillText("[E]", terminalPos.x + TERMINAL_WIDTH / 2, terminalPos.y - 10);
-      }
+        gameState.spawnPhase === "ready";
+      drawTerminal(ctx, terminalPos, TERMINAL_WIDTH, TERMINAL_HEIGHT, showTerminalHint);
 
       // Robot
-      const robotY = robotPos.y + gameState.robotCollapseOffset;
-      let robotColor = "#ef4444";
-      if (gameState.robotAnimationPhase === "flashing" && gameState.robotFlashOn) {
-        robotColor = "#fef08a";
-      } else if (gameState.robotDisabled && gameState.robotAnimationPhase !== "flashing") {
-        robotColor = "#4b5563";
-      }
-
-      ctx.fillStyle = robotColor;
-      ctx.fillRect(robotPos.x, robotY, ROBOT_WIDTH, ROBOT_HEIGHT - gameState.robotCollapseOffset);
-      ctx.fillRect(robotPos.x + 10, robotY - 15, ROBOT_WIDTH - 20, 20);
-
-      const eyeColor =
-        gameState.robotDisabled && gameState.robotAnimationPhase !== "flashing"
-          ? "#374151"
-          : "#fef08a";
-      ctx.fillStyle = eyeColor;
-      ctx.beginPath();
-      ctx.arc(robotPos.x + 18, robotY + 25, 8, 0, Math.PI * 2);
-      ctx.arc(robotPos.x + ROBOT_WIDTH - 18, robotY + 25, 8, 0, Math.PI * 2);
-      ctx.fill();
-
-      if (!gameState.robotDisabled || gameState.robotAnimationPhase === "flashing") {
-        ctx.fillStyle = "#000";
-        ctx.beginPath();
-        ctx.arc(robotPos.x + 18, robotY + 25, 3, 0, Math.PI * 2);
-        ctx.arc(robotPos.x + ROBOT_WIDTH - 18, robotY + 25, 3, 0, Math.PI * 2);
-        ctx.fill();
-      }
-
-      ctx.fillStyle =
-        gameState.robotDisabled && gameState.robotAnimationPhase !== "flashing"
-          ? "#374151"
-          : "#000";
-      ctx.fillRect(robotPos.x + 15, robotY + 50, ROBOT_WIDTH - 30, 8);
-
-      ctx.fillStyle = robotColor;
-      ctx.fillRect(robotPos.x - 12, robotY + 20, 12, 35);
-      ctx.fillRect(robotPos.x + ROBOT_WIDTH, robotY + 20, 12, 35);
-
-      ctx.fillStyle =
-        gameState.robotDisabled && gameState.robotAnimationPhase === "done"
-          ? "#6b7280"
-          : "#fff";
-      ctx.font = "bold 28px Arial";
-      ctx.textAlign = "center";
-      ctx.fillText(
-        gameState.robotDisabled && gameState.robotAnimationPhase === "done"
-          ? "---"
-          : gameState.targetNumber.toString(),
-        robotPos.x + ROBOT_WIDTH / 2,
-        robotY - 25
+      drawLevel1Robot(
+        ctx,
+        robotPos,
+        ROBOT_WIDTH,
+        ROBOT_HEIGHT,
+        gameState.robotDisabled,
+        gameState.robotAnimationPhase,
+        gameState.robotFlashOn,
+        gameState.robotCollapseOffset,
+        gameState.targetNumber
       );
 
       // Sparks
-      gameState.sparks.forEach((spark) => {
-        ctx.fillStyle = `rgba(254, 240, 138, ${spark.life})`;
-        ctx.beginPath();
-        ctx.arc(spark.x, spark.y, 3, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.strokeStyle = `rgba(251, 191, 36, ${spark.life * 0.5})`;
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.moveTo(spark.x, spark.y);
-        ctx.lineTo(spark.x - spark.vx * 2, spark.y - spark.vy * 2);
-        ctx.stroke();
-      });
+      drawSparks(ctx, gameState.sparks);
 
       // Start zone
-      ctx.strokeStyle = "#60a5fa";
-      ctx.lineWidth = 2;
-      ctx.setLineDash([5, 5]);
-      ctx.strokeRect(30, groundY - 65, 90, 65);
-      ctx.setLineDash([]);
-      ctx.fillStyle = "#60a5fa";
-      ctx.font = "11px Arial";
-      ctx.textAlign = "center";
-      ctx.fillText("ТЕЛЕПОРТ", 75, groundY + 20);
+      drawStartZone(ctx, groundY);
 
-      } else {
-        // ==================== LEVEL 2 RENDERING ====================
+    } else {
+      // ==================== LEVEL 2 RENDERING ====================
 
-        // Генератор справа (большой блок с дисплеями)
-        const genX = generatorPos.x;
-        const genY = generatorPos.y;
-        const genWidth = 140;
-        const genHeight = 120;
-        
-        // Корпус генератора
-        ctx.fillStyle = "#374151";
-        ctx.beginPath();
-        ctx.roundRect(genX, genY, genWidth, genHeight, 8);
-        ctx.fill();
-        
-        // Верхняя панель
-        ctx.fillStyle = "#1f2937";
-        ctx.fillRect(genX + 10, genY + 10, genWidth - 20, 30);
-        
-        // Красный дисплей (слева на генераторе) - для робота
-        ctx.fillStyle = gameState.level2.combatRobotDisabled ? "#374151" : "#7f1d1d";
-        ctx.fillRect(genX + 10, genY + 50, 55, 40);
-        ctx.fillStyle = gameState.level2.combatRobotDisabled ? "#1f2937" : "#450a0a";
-        ctx.fillRect(genX + 15, genY + 55, 45, 25);
-        ctx.fillStyle = gameState.level2.combatRobotDisabled ? "#6b7280" : "#ef4444";
-        ctx.font = "bold 18px Arial";
-        ctx.textAlign = "center";
-        ctx.fillText(gameState.level2.combatRobotDisabled ? "--" : gameState.level2.displayNumber1.toString(), genX + 37, genY + 75);
-        
-        // Синий дисплей (справа на генераторе) - для барьера  
-        ctx.fillStyle = !gameState.level2.barrierActive ? "#374151" : "#1e3a8a";
-        ctx.fillRect(genX + 75, genY + 50, 55, 40);
-        ctx.fillStyle = !gameState.level2.barrierActive ? "#1f2937" : "#1e1b4b";
-        ctx.fillRect(genX + 80, genY + 55, 45, 25);
-        ctx.fillStyle = !gameState.level2.barrierActive ? "#6b7280" : "#3b82f6";
-        ctx.font = "bold 18px Arial";
-        ctx.textAlign = "center";
-        ctx.fillText(!gameState.level2.barrierActive ? "--" : gameState.level2.displayNumber2.toString(), genX + 102, genY + 75);
-        
-        // Индикаторы под дисплеями
-        ctx.fillStyle = gameState.level2.combatRobotDisabled ? "#22c55e" : "#ef4444";
-        ctx.beginPath();
-        ctx.arc(genX + 37, genY + 98, 4, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.fillStyle = !gameState.level2.barrierActive ? "#22c55e" : "#3b82f6";
-        ctx.beginPath();
-        ctx.arc(genX + 102, genY + 98, 4, 0, Math.PI * 2);
-        ctx.fill();
-        
-        // Надпись "ГЕНЕРАТОР"
-        ctx.fillStyle = "#9ca3af";
-        ctx.font = "bold 10px Arial";
-        ctx.textAlign = "center";
-        ctx.fillText("ГЕНЕРАТОР", genX + genWidth / 2, genY + 25);
-        
-        // Детали генератора (вентиляция)
-        ctx.fillStyle = "#1f2937";
-        for (let i = 0; i < 3; i++) {
-          ctx.fillRect(genX + genWidth - 15, genY + 15 + i * 8, 10, 4);
-        }
-        
-        // Красный провод: от генератора к роботу (снизу)
-        const redWirePoints = [
-          { x: genX + 37, y: genY + genHeight },
-          { x: genX + 37, y: groundY - 20 },
-          { x: combatRobotPos.x + COMBAT_ROBOT_WIDTH / 2, y: groundY - 20 },
-          { x: combatRobotPos.x + COMBAT_ROBOT_WIDTH / 2, y: combatRobotPos.y + COMBAT_ROBOT_HEIGHT },
-        ];
-        
-        ctx.strokeStyle = gameState.level2.combatRobotDisabled ? "#4b5563" : "#ef4444";
-        ctx.lineWidth = 4;
-        ctx.beginPath();
-        ctx.moveTo(redWirePoints[0].x, redWirePoints[0].y);
-        for (let i = 1; i < redWirePoints.length; i++) {
-          ctx.lineTo(redWirePoints[i].x, redWirePoints[i].y);
-        }
-        ctx.stroke();
+      const genHeight = 120;
+      
+      // Генератор
+      drawGenerator(
+        ctx,
+        generatorPos,
+        gameState.level2.combatRobotDisabled,
+        gameState.level2.barrierActive,
+        gameState.level2.displayNumber1,
+        gameState.level2.displayNumber2
+      );
+      
+      // Провода
+      const redWirePoints: Position[] = [
+        { x: generatorPos.x + 37, y: generatorPos.y + genHeight },
+        { x: generatorPos.x + 37, y: groundY - 20 },
+        { x: combatRobotPos.x + COMBAT_ROBOT_WIDTH / 2, y: groundY - 20 },
+        { x: combatRobotPos.x + COMBAT_ROBOT_WIDTH / 2, y: combatRobotPos.y + COMBAT_ROBOT_HEIGHT },
+      ];
+      
+      const blueWirePoints: Position[] = [
+        { x: generatorPos.x + 102, y: generatorPos.y + genHeight },
+        { x: generatorPos.x + 102, y: groundY - 40 },
+        { x: barrierX + 10, y: groundY - 40 },
+        { x: barrierX + 10, y: groundY },
+      ];
 
-        // Синий провод: от генератора к барьеру (снизу)
-        const blueWirePoints = [
-          { x: genX + 102, y: genY + genHeight },
-          { x: genX + 102, y: groundY - 40 },
-          { x: barrierX + 10, y: groundY - 40 },
-          { x: barrierX + 10, y: groundY },
-        ];
-        
-        ctx.strokeStyle = !gameState.level2.barrierActive ? "#4b5563" : "#3b82f6";
-        ctx.lineWidth = 4;
-        ctx.beginPath();
-        ctx.moveTo(blueWirePoints[0].x, blueWirePoints[0].y);
-        for (let i = 1; i < blueWirePoints.length; i++) {
-          ctx.lineTo(blueWirePoints[i].x, blueWirePoints[i].y);
-        }
-        ctx.stroke();
+      drawWires(ctx, redWirePoints, blueWirePoints, gameState.level2.combatRobotDisabled, gameState.level2.barrierActive);
 
-        // Анимация тока по проводам
-        if (gameState.level2.wireAnimationActive !== "none") {
-          const wirePoints = gameState.level2.wireAnimationActive === "robot" ? redWirePoints : blueWirePoints;
-          const wireColor = gameState.level2.wireAnimationActive === "robot" ? "#fef08a" : "#93c5fd";
-          const progress = gameState.level2.wireAnimationProgress;
-          
-          // Вычисляем общую длину провода
-          let totalLength = 0;
-          for (let i = 1; i < wirePoints.length; i++) {
-            totalLength += Math.sqrt(
-              Math.pow(wirePoints[i].x - wirePoints[i-1].x, 2) +
-              Math.pow(wirePoints[i].y - wirePoints[i-1].y, 2)
-            );
-          }
-          
-          // Рисуем светящуюся часть провода
-          const targetLength = totalLength * progress;
-          let currentLength = 0;
-          
-          ctx.strokeStyle = wireColor;
-          ctx.lineWidth = 6;
-          ctx.shadowColor = wireColor;
-          ctx.shadowBlur = 15;
-          ctx.beginPath();
-          ctx.moveTo(wirePoints[0].x, wirePoints[0].y);
-          
-          for (let i = 1; i < wirePoints.length; i++) {
-            const segmentLength = Math.sqrt(
-              Math.pow(wirePoints[i].x - wirePoints[i-1].x, 2) +
-              Math.pow(wirePoints[i].y - wirePoints[i-1].y, 2)
-            );
-            
-            if (currentLength + segmentLength <= targetLength) {
-              ctx.lineTo(wirePoints[i].x, wirePoints[i].y);
-              currentLength += segmentLength;
-            } else {
-              const remaining = targetLength - currentLength;
-              const ratio = remaining / segmentLength;
-              const endX = wirePoints[i-1].x + (wirePoints[i].x - wirePoints[i-1].x) * ratio;
-              const endY = wirePoints[i-1].y + (wirePoints[i].y - wirePoints[i-1].y) * ratio;
-              ctx.lineTo(endX, endY);
-              
-              // Рисуем искру на конце
-              ctx.stroke();
-              ctx.beginPath();
-              ctx.arc(endX, endY, 8 + Math.sin(Date.now() * 0.02) * 3, 0, Math.PI * 2);
-              ctx.fillStyle = wireColor;
-              ctx.fill();
-              break;
-            }
-          }
-          ctx.stroke();
-          ctx.shadowBlur = 0;
-        }
+      // Анимация тока по проводам
+      if (gameState.level2.wireAnimationActive !== "none") {
+        const wirePoints = gameState.level2.wireAnimationActive === "robot" ? redWirePoints : blueWirePoints;
+        const wireColor = gameState.level2.wireAnimationActive === "robot" ? "#fef08a" : "#93c5fd";
+        drawWireAnimation(ctx, wirePoints, wireColor, gameState.level2.wireAnimationProgress);
+      }
 
-        // Терминал Level 2 (такой же как Level 1)
-        ctx.fillStyle = "#3b82f6";
-        ctx.fillRect(level2TerminalPos.x, level2TerminalPos.y, TERMINAL_WIDTH, TERMINAL_HEIGHT);
-        ctx.fillStyle = "#1e3a5f";
-        ctx.fillRect(level2TerminalPos.x + 5, level2TerminalPos.y + 5, TERMINAL_WIDTH - 10, 30);
-        ctx.fillStyle = "#1e40af";
-        ctx.fillRect(level2TerminalPos.x + 15, level2TerminalPos.y + TERMINAL_HEIGHT - 15, TERMINAL_WIDTH - 30, 15);
-        if (Math.floor(Date.now() / 500) % 2 === 0) {
-          ctx.fillStyle = "#4ade80";
-          ctx.fillRect(level2TerminalPos.x + 10, level2TerminalPos.y + 15, 8, 12);
-        }
+      // Терминал Level 2
+      const showTerminal2Hint = isNearTerminal(gameState.playerPos.x, gameState.playerPos.y, 2) &&
+        gameState.spawnPhase === "ready" &&
+        !gameState.level2.playerDead &&
+        (!gameState.level2.combatRobotDisabled || gameState.level2.barrierActive) &&
+        gameState.level2.wireAnimationActive === "none";
+      drawTerminal(ctx, level2TerminalPos, TERMINAL_WIDTH, TERMINAL_HEIGHT, showTerminal2Hint);
 
-        if (
-          isNearTerminal(gameState.playerPos.x, gameState.playerPos.y, 2) &&
-          gameState.spawnPhase === "ready" &&
-          !gameState.level2.playerDead &&
-          (!gameState.level2.combatRobotDisabled || gameState.level2.barrierActive) &&
-          gameState.level2.wireAnimationActive === "none"
-        ) {
-          ctx.fillStyle = "#fbbf24";
-          ctx.font = "bold 14px Arial";
-          ctx.textAlign = "center";
-          ctx.fillText("[E]", level2TerminalPos.x + TERMINAL_WIDTH / 2, level2TerminalPos.y - 10);
-        }
+      // Барьер
+      if (gameState.level2.barrierActive) {
+        drawBarrier(ctx, barrierX, groundY, gameState.level2.barrierTimeLeft, BARRIER_MAX_TIME, gameState.level2.combatRobotDisabled);
+      }
 
-        // Барьер (энергетический щит)
-        if (gameState.level2.barrierActive) {
-          const barrierAlpha = 0.3 + Math.sin(Date.now() * 0.005) * 0.2;
-          const gradient = ctx.createLinearGradient(barrierX, 0, barrierX + 20, 0);
-          gradient.addColorStop(0, `rgba(59, 130, 246, 0)`);
-          gradient.addColorStop(0.5, `rgba(59, 130, 246, ${barrierAlpha})`);
-          gradient.addColorStop(1, `rgba(59, 130, 246, 0)`);
-          ctx.fillStyle = gradient;
-          ctx.fillRect(barrierX - 10, 0, 40, groundY);
+      // Пули
+      drawBullets(ctx, gameState.level2.bullets, BULLET_WIDTH, BULLET_HEIGHT);
 
-          // Линии энергии
-          ctx.strokeStyle = `rgba(147, 197, 253, ${0.5 + Math.sin(Date.now() * 0.01) * 0.3})`;
-          ctx.lineWidth = 2;
-          for (let i = 0; i < groundY; i += 30) {
-            const offset = Math.sin((Date.now() + i * 10) * 0.005) * 5;
-            ctx.beginPath();
-            ctx.moveTo(barrierX + offset, i);
-            ctx.lineTo(barrierX + offset, i + 20);
-            ctx.stroke();
-          }
-
-          // Таймер барьера (только если робот ещё активен)
-          if (!gameState.level2.combatRobotDisabled) {
-            const timePercent = gameState.level2.barrierTimeLeft / BARRIER_MAX_TIME;
-            ctx.fillStyle = "#1e3a8a";
-            ctx.fillRect(barrierX - 40, 20, 100, 25);
-            ctx.fillStyle = timePercent > 0.3 ? "#3b82f6" : "#ef4444";
-            ctx.fillRect(barrierX - 38, 22, 96 * timePercent, 21);
-            ctx.fillStyle = "#fff";
-            ctx.font = "bold 12px Arial";
-            ctx.textAlign = "center";
-            ctx.fillText(`${Math.ceil(gameState.level2.barrierTimeLeft / 1000)}с`, barrierX + 10, 38);
-          }
-        }
-
-        // Пули
-        ctx.fillStyle = "#fbbf24";
-        gameState.level2.bullets.forEach((bullet) => {
-          ctx.beginPath();
-          ctx.ellipse(bullet.x + BULLET_WIDTH / 2, bullet.y + BULLET_HEIGHT / 2, BULLET_WIDTH / 2, BULLET_HEIGHT / 2, 0, 0, Math.PI * 2);
-          ctx.fill();
-          // След пули
-          const trailGradient = ctx.createLinearGradient(bullet.x, bullet.y, bullet.x + 40, bullet.y);
-          trailGradient.addColorStop(0, "rgba(251, 191, 36, 0.5)");
-          trailGradient.addColorStop(1, "rgba(251, 191, 36, 0)");
-          ctx.fillStyle = trailGradient;
-          ctx.fillRect(bullet.x + BULLET_WIDTH, bullet.y + 2, 30, BULLET_HEIGHT - 4);
-        });
-
-        // Боевой робот
-        drawCombatRobot(
+      // Боевой робот
+      drawCombatRobot(
         ctx,
         combatRobotPos.x,
         combatRobotPos.y,
         gameState.level2.combatRobotDisabled,
         gameState.level2.combatRobotAnimPhase,
         gameState.level2.combatRobotFlashCount,
-        gameState.level2.combatRobotCollapseOffset
+        gameState.level2.combatRobotCollapseOffset,
+        COMBAT_ROBOT_WIDTH,
+        COMBAT_ROBOT_HEIGHT
       );
 
       // Искры боевого робота
-      gameState.level2.sparks.forEach((spark) => {
-        ctx.fillStyle = `rgba(254, 240, 138, ${spark.life})`;
-        ctx.beginPath();
-        ctx.arc(spark.x, spark.y, 4, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.strokeStyle = `rgba(239, 68, 68, ${spark.life * 0.5})`;
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.moveTo(spark.x, spark.y);
-        ctx.lineTo(spark.x - spark.vx * 2, spark.y - spark.vy * 2);
-        ctx.stroke();
-      });
+      drawCombatSparks(ctx, gameState.level2.sparks);
 
       // Exit Level 2
       const exitActive = gameState.level2.combatRobotDisabled && !gameState.level2.barrierActive;
-      ctx.fillStyle = exitActive ? "#22c55e" : "#4b5563";
-      ctx.fillRect(level2ExitPos.x, level2ExitPos.y, EXIT_WIDTH, EXIT_HEIGHT);
-      ctx.fillStyle = exitActive ? "#166534" : "#374151";
-      ctx.fillRect(level2ExitPos.x + 10, level2ExitPos.y + 20, EXIT_WIDTH - 20, EXIT_HEIGHT - 20);
-      ctx.fillStyle = "#fff";
-      ctx.font = "bold 14px Arial";
-      ctx.textAlign = "center";
-      ctx.fillText("EXIT", level2ExitPos.x + EXIT_WIDTH / 2, level2ExitPos.y + 14);
-      if (exitActive) {
-        ctx.fillStyle = "#4ade80";
-        ctx.beginPath();
-        ctx.arc(level2ExitPos.x + EXIT_WIDTH / 2, level2ExitPos.y - 15, 6, 0, Math.PI * 2);
-        ctx.fill();
-      }
+      drawExit(ctx, level2ExitPos, EXIT_WIDTH, EXIT_HEIGHT, exitActive);
 
       // Стартовая зона
-      ctx.strokeStyle = "#60a5fa";
-      ctx.lineWidth = 2;
-      ctx.setLineDash([5, 5]);
-      ctx.strokeRect(30, groundY - 65, 90, 65);
-      ctx.setLineDash([]);
-      ctx.fillStyle = "#60a5fa";
-      ctx.font = "11px Arial";
-      ctx.textAlign = "center";
-      ctx.fillText("ТЕЛЕПОРТ", 75, groundY + 20);
+      drawStartZone(ctx, groundY);
     }
 
     // ==================== SPAWN ANIMATION ====================
@@ -1550,33 +546,11 @@ export default function Home() {
     const playerCenterY = gameState.playerPos.y + PLAYER_HEIGHT / 2;
 
     if (gameState.spawnPhase === "beam") {
-      const beamWidth = 40 * (1 - gameState.spawnProgress * 0.3);
-      const gradient = ctx.createLinearGradient(playerCenterX, 0, playerCenterX, groundY);
-      gradient.addColorStop(0, "rgba(96, 165, 250, 0)");
-      gradient.addColorStop(0.3, `rgba(96, 165, 250, ${0.6 * (1 - gameState.spawnProgress)})`);
-      gradient.addColorStop(0.7, `rgba(52, 211, 153, ${0.8 * (1 - gameState.spawnProgress)})`);
-      gradient.addColorStop(1, "rgba(52, 211, 153, 0)");
-
-      ctx.fillStyle = gradient;
-      ctx.beginPath();
-      ctx.moveTo(playerCenterX - beamWidth / 2, 0);
-      ctx.lineTo(playerCenterX + beamWidth / 2, 0);
-      ctx.lineTo(playerCenterX + beamWidth / 4, groundY);
-      ctx.lineTo(playerCenterX - beamWidth / 4, groundY);
-      ctx.closePath();
-      ctx.fill();
-
-      gameState.spawnParticles.forEach((p) => {
-        ctx.fillStyle = p.color;
-        ctx.globalAlpha = p.life;
-        ctx.beginPath();
-        ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.globalAlpha = 1;
-      });
+      drawSpawnBeam(ctx, playerCenterX, groundY, gameState.spawnProgress);
+      drawSpawnParticles(ctx, gameState.spawnParticles);
 
       ctx.globalAlpha = 0.3 + Math.sin(Date.now() * 0.02) * 0.2;
-      drawAstronaut(ctx, gameState.playerPos.x, gameState.playerPos.y, gameState.facingRight, false, true, 0, "ready", 1);
+      drawAstronaut(ctx, gameState.playerPos.x, gameState.playerPos.y, gameState.facingRight, false, true, 0, "ready", 1, PLAYER_WIDTH, PLAYER_HEIGHT);
       ctx.globalAlpha = 1;
     } else if (gameState.spawnPhase === "materialize") {
       const materializedHeight = PLAYER_HEIGHT * gameState.spawnProgress;
@@ -1586,14 +560,10 @@ export default function Home() {
       ctx.rect(gameState.playerPos.x - 20, gameState.playerPos.y + PLAYER_HEIGHT - materializedHeight, PLAYER_WIDTH + 40, materializedHeight + 20);
       ctx.clip();
 
-      drawAstronaut(ctx, gameState.playerPos.x, gameState.playerPos.y, gameState.facingRight, false, true, 0, "materialize", gameState.spawnProgress);
+      drawAstronaut(ctx, gameState.playerPos.x, gameState.playerPos.y, gameState.facingRight, false, true, 0, "materialize", gameState.spawnProgress, PLAYER_WIDTH, PLAYER_HEIGHT);
       ctx.restore();
 
-      ctx.strokeStyle = `rgba(96, 165, 250, ${1 - gameState.spawnProgress})`;
-      ctx.lineWidth = 3;
-      ctx.beginPath();
-      ctx.arc(playerCenterX, playerCenterY, 30 + gameState.spawnProgress * 20, 0, Math.PI * 2);
-      ctx.stroke();
+      drawMaterializeRing(ctx, playerCenterX, playerCenterY, gameState.spawnProgress);
     } else if (!gameState.level2.playerDead) {
       drawAstronaut(
         ctx,
@@ -1604,17 +574,16 @@ export default function Home() {
         gameState.isGrounded,
         gameState.animationTime,
         gameState.spawnPhase,
-        gameState.spawnProgress
+        gameState.spawnProgress,
+        PLAYER_WIDTH,
+        PLAYER_HEIGHT
       );
     }
 
     // Номер уровня
-    ctx.fillStyle = "#fff";
-    ctx.font = "bold 16px Arial";
-    ctx.textAlign = "left";
-    ctx.fillText(`Уровень ${gameState.currentLevel}`, 20, 30);
+    drawLevelLabel(ctx, gameState.currentLevel);
 
-  }, [gameState, isNearTerminal, robotPos, terminalPos, exitPos, level2ExitPos, combatRobotPos, level2TerminalPos, groundY, barrierX, drawAstronaut, drawCombatRobot]);
+  }, [gameState, isNearTerminal, robotPos, terminalPos, exitPos, level2ExitPos, combatRobotPos, level2TerminalPos, groundY, barrierX, generatorPos]);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const filtered = e.target.value.replace(/[^01]/g, "");
