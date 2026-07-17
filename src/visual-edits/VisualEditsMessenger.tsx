@@ -7,6 +7,17 @@ export const CHANNEL = "ORCHIDS_HOVER_v1" as const;
 const VISUAL_EDIT_MODE_KEY = "orchids_visual_edit_mode" as const;
 const FOCUSED_ELEMENT_KEY = "orchids_focused_element" as const;
 
+const hasLocalStorage = (): boolean => {
+  if (typeof window === "undefined") return false;
+  const ls = window.localStorage;
+  return (
+    typeof ls !== "undefined" &&
+    typeof ls.getItem === "function" &&
+    typeof ls.setItem === "function" &&
+    typeof ls.removeItem === "function"
+  );
+};
+
 // Deduplicate helper for high-frequency traffic (HIT / FOCUS_MOVED / SCROLL)
 // -----------------------------------------------------------------------------
 let _orchidsLastMsg = "";
@@ -405,8 +416,8 @@ export default function HoverReceiver() {
   const [focusedElementId, setFocusedElementId] = useState<string | null>(null);
   const [isVisualEditMode, setIsVisualEditMode] = useState(() => {
     // Initialize from localStorage if available
-    if (typeof window !== "undefined") {
-      const stored = localStorage.getItem(VISUAL_EDIT_MODE_KEY);
+    if (hasLocalStorage()) {
+      const stored = window.localStorage.getItem(VISUAL_EDIT_MODE_KEY);
       return stored === "true";
     }
     return false;
@@ -455,8 +466,11 @@ export default function HoverReceiver() {
   useEffect(() => {
     isVisualEditModeRef.current = isVisualEditMode;
     // Persist to localStorage
-    if (typeof window !== "undefined") {
-      localStorage.setItem(VISUAL_EDIT_MODE_KEY, String(isVisualEditMode));
+    if (hasLocalStorage()) {
+      window.localStorage.setItem(
+        VISUAL_EDIT_MODE_KEY,
+        String(isVisualEditMode)
+      );
     }
   }, [isVisualEditMode]);
 
@@ -478,9 +492,9 @@ export default function HoverReceiver() {
 
       // Restore focused element after a short delay to ensure DOM is ready
       setTimeout(() => {
-        if (typeof window !== "undefined") {
+        if (hasLocalStorage()) {
           // Restore focused element
-          const focusedData = localStorage.getItem(FOCUSED_ELEMENT_KEY);
+          const focusedData = window.localStorage.getItem(FOCUSED_ELEMENT_KEY);
           if (focusedData) {
             try {
               const { id } = JSON.parse(focusedData);
@@ -1534,12 +1548,12 @@ export default function HoverReceiver() {
         setFocusTag(tagName);
 
         // Save focused element info to localStorage
-        if (hitId && typeof window !== "undefined") {
+        if (hitId && hasLocalStorage()) {
           const focusedElementData = {
             id: hitId,
             tag: tagName,
           };
-          localStorage.setItem(
+          window.localStorage.setItem(
             FOCUSED_ELEMENT_KEY,
             JSON.stringify(focusedElementData)
           );
@@ -1755,8 +1769,8 @@ export default function HoverReceiver() {
           setHoverTag(null);
 
           // Clear focused element from localStorage
-          if (typeof window !== "undefined") {
-            localStorage.removeItem(FOCUSED_ELEMENT_KEY);
+          if (hasLocalStorage()) {
+            window.localStorage.removeItem(FOCUSED_ELEMENT_KEY);
           }
 
           // Notify parent that focus was cleared
@@ -1828,9 +1842,9 @@ export default function HoverReceiver() {
         setIsVisualEditMode(newMode);
 
         // Clear localStorage if visual edit mode is being turned off
-        if (!newMode && typeof window !== "undefined") {
-          localStorage.removeItem(VISUAL_EDIT_MODE_KEY);
-          localStorage.removeItem(FOCUSED_ELEMENT_KEY);
+        if (!newMode && hasLocalStorage()) {
+          window.localStorage.removeItem(VISUAL_EDIT_MODE_KEY);
+          window.localStorage.removeItem(FOCUSED_ELEMENT_KEY);
         }
 
         // Send acknowledgement back to parent so it knows we received the mode change

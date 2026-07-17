@@ -1,4 +1,4 @@
-import type { GameState, Position, Spark, SpawnParticle } from "./types";
+import type { GameState, Position, Spark, SpawnParticle, Level3Platform } from "./types";
 
 // ==================== DRAW ASTRONAUT ====================
 export function drawAstronaut(
@@ -277,9 +277,12 @@ export function drawBackground(
   if (level === 1) {
     skyGradient.addColorStop(0, "#0f172a");
     skyGradient.addColorStop(1, "#1e293b");
-  } else {
+  } else if (level === 2) {
     skyGradient.addColorStop(0, "#1a0a0a");
     skyGradient.addColorStop(1, "#2d1515");
+  } else {
+    skyGradient.addColorStop(0, "#0b1120");
+    skyGradient.addColorStop(1, "#111827");
   }
   ctx.fillStyle = skyGradient;
   ctx.fillRect(0, 0, canvasWidth, groundY);
@@ -296,16 +299,16 @@ export function drawBackground(
   }
 
   // Пол
-  ctx.fillStyle = level === 1 ? "#334155" : "#3d2020";
+  ctx.fillStyle = level === 1 ? "#334155" : level === 2 ? "#3d2020" : "#1f2937";
   ctx.fillRect(0, groundY, canvasWidth, groundHeight);
-  ctx.strokeStyle = level === 1 ? "#475569" : "#5c3030";
+  ctx.strokeStyle = level === 1 ? "#475569" : level === 2 ? "#5c3030" : "#334155";
   ctx.lineWidth = 3;
   ctx.beginPath();
   ctx.moveTo(0, groundY);
   ctx.lineTo(canvasWidth, groundY);
   ctx.stroke();
 
-  ctx.fillStyle = level === 1 ? "#1e293b" : "#2a1515";
+  ctx.fillStyle = level === 1 ? "#1e293b" : level === 2 ? "#2a1515" : "#0f172a";
   for (let i = 0; i < canvasWidth; i += 60) {
     ctx.fillRect(i + 5, groundY + 8, 50, 4);
     ctx.fillRect(i + 10, groundY + 20, 40, 3);
@@ -360,6 +363,42 @@ export function drawTerminal(
     ctx.textAlign = "center";
     ctx.fillText("[E]", pos.x + width / 2, pos.y - 10);
   }
+}
+
+// ==================== DRAW LEVEL 3 PLATFORMS ====================
+export function drawLevel3Platforms(
+  ctx: CanvasRenderingContext2D,
+  platforms: Level3Platform[]
+) {
+  platforms.forEach((platform) => {
+    const baseColor = platform.active ? "#22c55e" : "#ef4444";
+    const innerColor = platform.active ? "#16a34a" : "#b91c1c";
+
+    ctx.fillStyle = baseColor;
+    ctx.beginPath();
+    ctx.roundRect(platform.x, platform.y, platform.width, platform.height, 6);
+    ctx.fill();
+
+    ctx.fillStyle = innerColor;
+    ctx.fillRect(
+      platform.x + 8,
+      platform.y + 6,
+      platform.width - 16,
+      platform.height - 12
+    );
+
+    if (platform.number > 0) {
+      ctx.fillStyle = "#fef9c3";
+      ctx.font = "bold 14px Arial";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(
+        String(platform.number),
+        platform.x + platform.width / 2,
+        platform.y + platform.height / 2
+      );
+    }
+  });
 }
 
 // ==================== DRAW START ZONE ====================

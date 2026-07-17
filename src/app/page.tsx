@@ -1,836 +1,517 @@
 "use client";
 
-import { useEffect, useRef, useState, useCallback } from "react";
-import type { Position, SpawnParticle, GameState } from "@/game/types";
+import { useEffect, useState } from "react";
+import { supabase, getUserProgress, updateUserProgress } from "@/lib/supabase";
+import type { User } from "@supabase/supabase-js";
+import Game from "@/components/Game";
+import PlacementTest from "@/components/PlacementTest";
 import {
-  drawAstronaut,
-  drawCombatRobot,
-  drawSparks,
-  drawCombatSparks,
-  drawSpawnParticles,
-  drawBackground,
-  drawExit,
-  drawTerminal,
-  drawStartZone,
-  drawLevel1Robot,
-  drawGenerator,
-  drawWires,
-  drawWireAnimation,
-  drawBarrier,
-  drawBullets,
-  drawSpawnBeam,
-  drawMaterializeRing,
-  drawLevelLabel,
-} from "@/game/render";
-import {
-  updateGame,
-  CANVAS_WIDTH,
-  CANVAS_HEIGHT,
-  PLAYER_WIDTH,
-  PLAYER_HEIGHT,
-  ROBOT_WIDTH,
-  ROBOT_HEIGHT,
-  EXIT_WIDTH,
-  EXIT_HEIGHT,
-  GROUND_HEIGHT,
-  BARRIER_MAX_TIME,
-  BULLET_WIDTH,
-  BULLET_HEIGHT,
-  COMBAT_ROBOT_WIDTH,
-  COMBAT_ROBOT_HEIGHT,
-  type InputState,
-  type WorldConfig,
-} from "@/game/engine";
+  knowledgeLevelLabels,
+  type KnowledgeLevel,
+  type PlacementEvaluation,
+} from "@/lib/placement-test";
 
-// ==================== LOCAL CONSTANTS ====================
-const TERMINAL_WIDTH = 50;
-const TERMINAL_HEIGHT = 60;
-const INTERACTION_DISTANCE = 70;
+type Screen = "auth" | "menu" | "themes" | "levels" | "game" | "placement";
 
-// ==================== MAIN COMPONENT ====================
+const TOTAL_LEVELS = 7;
+const THEMES = [
+  {
+    id: "coding",
+    title: "Системы счисления и кодирование",
+    subtitle: "Уровни по двоичной логике и кодированию",
+    levels: [1, 2, 3],
+  },
+  {
+    id: "logic",
+    title: "Логика и условия",
+    subtitle: "Логические ворота и таблицы истинности",
+    levels: [4, 5],
+  },
+  {
+    id: "algorithms",
+    title: "Алгоритмы и структуры",
+    subtitle: "Исполнитель и пошаговые алгоритмы",
+    levels: [6, 7],
+  },
+];
+
 export default function Home() {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const keysPressed = useRef<Set<string>>(new Set());
-  const inputRef = useRef<HTMLInputElement>(null);
-  const animationFrameRef = useRef<number>(0);
+  const [user, setUser] = useState<User | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [screen, setScreen] = useState<Screen>("auth");
+  const [maxLevelCompleted, setMaxLevelCompleted] = useState(0);
+  const [selectedLevel, setSelectedLevel] = useState(1);
+  const [selectedTheme, setSelectedTheme] = useState(THEMES[0].id);
+  const [knowledgeLevel, setKnowledgeLevel] = useState<KnowledgeLevel | null>(null);
+  const [pendingStartLevel, setPendingStartLevel] = useState<number | null>(null);
+  const [placementRetake, setPlacementRetake] = useState(false);
 
-  const groundY = CANVAS_HEIGHT - GROUND_HEIGHT;
+  const activeTheme = THEMES.find((theme) => theme.id === selectedTheme) ?? THEMES[0];
 
-  // Level 1 positions
-  const robotPos: Position = { x: 550, y: groundY - ROBOT_HEIGHT };
-  const terminalPos: Position = { x: 430, y: groundY - TERMINAL_HEIGHT };
-  const exitPos: Position = { x: CANVAS_WIDTH - EXIT_WIDTH - 30, y: groundY - EXIT_HEIGHT };
+  // Auth form state
+  const [authMode, setAuthMode] = useState<"login" | "register">("login");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [authError, setAuthError] = useState("");
+  const [authLoading, setAuthLoading] = useState(false);
 
-  // Level 2 positions - ГЕНЕРАТОР СПРАВА, РОБОТ ЛЕВЕЕ
-  const combatRobotPos: Position = { x: 500, y: groundY - COMBAT_ROBOT_HEIGHT }; // Робот x=500
-  const generatorPos: Position = { x: CANVAS_WIDTH - 180, y: groundY - 120 }; // Генератор справа
-  const level2TerminalPos: Position = { x: 200, y: groundY - TERMINAL_HEIGHT };
-  const level2ExitPos: Position = { x: CANVAS_WIDTH - EXIT_WIDTH - 30, y: groundY - EXIT_HEIGHT };
-  const barrierX = 380; // Позиция барьера
+  // Check auth on load
+  useEffect(() => {
+    let mounted = true;
 
-  function initGameState(level: number = 1): GameState {
-    const initialParticles: SpawnParticle[] = [];
-    for (let i = 0; i < 20; i++) {
-      initialParticles.push({
-        x: 80 + PLAYER_WIDTH / 2 + (Math.random() - 0.5) * 60,
-        y: CANVAS_HEIGHT - GROUND_HEIGHT - PLAYER_HEIGHT / 2 + (Math.random() - 0.5) * 80,
-        vx: (Math.random() - 0.5) * 3,
-        vy: (Math.random() - 0.5) * 3,
-        life: 1,
-        size: Math.random() * 4 + 2,
-        color: Math.random() > 0.5 ? "#60a5fa" : "#34d399",
-      });
-    }
+    const handleSession = async (sessionUser: User | null) => {
+      if (!mounted) return;
 
-    const num1 = Math.floor(Math.random() * 27) + 5;
-    let num2 = Math.floor(Math.random() * 27) + 5;
-    while (num2 === num1) {
-      num2 = Math.floor(Math.random() * 27) + 5;
-    }
-
-    return {
-      currentLevel: level,
-      playerPos: { x: 80, y: CANVAS_HEIGHT - GROUND_HEIGHT - PLAYER_HEIGHT },
-      playerVelocityY: 0,
-      isGrounded: true,
-      isMoving: false,
-      facingRight: true,
-      animationTime: 0,
-      robotDisabled: level === 2,
-      robotColliderActive: level === 1,
-      targetNumber: Math.floor(Math.random() * 27) + 5,
-      showTerminal: false,
-      terminalInput: "",
-      terminalMessage: "",
-      terminalMessageType: "",
-      errorMessageTimer: 0,
-      levelComplete: false,
-      levelCompletePhase: "none",
-      levelCompleteOpacity: 0,
-      currentGoal: level === 1 ? "Отключить робота через терминал" : "Отключить боевого робота",
-      taskPanelExpanded: true,
-      robotAnimationPhase: "none",
-      robotFlashCount: 0,
-      robotFlashOn: false,
-      robotCollapseOffset: 0,
-      sparks: [],
-      spawnPhase: "beam",
-      spawnProgress: 0,
-      spawnParticles: initialParticles,
-      level2: {
-        combatRobotDisabled: false,
-        combatRobotAnimPhase: "none",
-        combatRobotFlashCount: 0,
-        combatRobotCollapseOffset: 0,
-        barrierActive: level === 2,
-        barrierAnimPhase: "none",
-        barrierTimeLeft: BARRIER_MAX_TIME,
-        bullets: [],
-        shootTimer: 0,
-        displayNumber1: num1,
-        displayNumber2: num2,
-        playerDead: false,
-        deathReason: "",
-        narratorMessage: level === 2 ? {
-          text: "ВНИМАНИЕ! Боевой робот обнаружил угрозу! Я активировал защитный барьер, но он продержится недолго. Посмотри на дисплеи — числа и цвета проводов подскажут, что делать!",
-          duration: 5000,
-          timer: 5000,
-        } : null,
-        narratorShown: false,
-        terminalTarget: null,
-        sparks: [],
-        wireAnimationActive: "none",
-        wireAnimationProgress: 0,
-        wireParticles: [],
-      },
-    };
-  }
-
-  const [gameState, setGameState] = useState<GameState>(() => initGameState());
-
-  function binaryToDecimal(binary: string): number {
-    if (!/^[01]+$/.test(binary) || binary.length === 0) return -1;
-    return parseInt(binary, 2);
-  }
-
-  const isNearTerminal = useCallback(
-    (x: number, y: number, level: number): boolean => {
-      const playerCenter = { x: x + PLAYER_WIDTH / 2, y: y + PLAYER_HEIGHT / 2 };
-      const tPos = level === 1 ? terminalPos : level2TerminalPos;
-      const terminalCenter = {
-        x: tPos.x + TERMINAL_WIDTH / 2,
-        y: tPos.y + TERMINAL_HEIGHT / 2,
-      };
-      const distance = Math.sqrt(
-        Math.pow(playerCenter.x - terminalCenter.x, 2) + Math.pow(playerCenter.y - terminalCenter.y, 2)
-      );
-      return distance < INTERACTION_DISTANCE;
-    },
-    [terminalPos, level2TerminalPos]
-  );
-
-  const handleTerminalSubmit = useCallback(() => {
-    const input = gameState.terminalInput.trim();
-    if (input.length === 0) return;
-
-    const enteredValue = binaryToDecimal(input);
-
-    if (gameState.currentLevel === 1) {
-      if (enteredValue === gameState.targetNumber) {
-        setGameState((prev) => ({
-          ...prev,
-          robotDisabled: true,
-          showTerminal: false,
-          terminalInput: "",
-          terminalMessage: "",
-          terminalMessageType: "",
-          currentGoal: "Дойти до выхода",
-          robotAnimationPhase: "flashing",
-          robotFlashCount: 0,
-          robotFlashOn: true,
-        }));
+      setUser(sessionUser);
+      if (sessionUser) {
+        const progress = await loadProgress(sessionUser.id);
+        if (!mounted) return;
+        setScreen(progress?.knowledge_level ? "menu" : "placement");
       } else {
-        setGameState((prev) => ({
-          ...prev,
-          terminalMessage: "Неверно, попробуй ещё раз",
-          terminalMessageType: "error",
-          errorMessageTimer: 1500,
-        }));
+        setScreen("auth");
+        setMaxLevelCompleted(0);
+        setKnowledgeLevel(null);
+        setPendingStartLevel(null);
       }
-    } else {
-      const target = gameState.level2.terminalTarget;
-      if (!target) return;
-
-      if (target === "robot") {
-        if (enteredValue === gameState.level2.displayNumber1) {
-          // Запускаем анимацию тока по красному проводу к роботу
-          setGameState((prev) => ({
-            ...prev,
-            showTerminal: false,
-            terminalInput: "",
-            terminalMessage: "",
-            terminalMessageType: "",
-            level2: {
-              ...prev.level2,
-              terminalTarget: null,
-              wireAnimationActive: "robot",
-              wireAnimationProgress: 0,
-              wireParticles: [],
-            },
-          }));
-        } else if (enteredValue === gameState.level2.displayNumber2) {
-          // Запускаем анимацию тока по синему проводу к барьеру (ошибка - барьер отключится)
-          setGameState((prev) => ({
-            ...prev,
-            showTerminal: false,
-            terminalInput: "",
-            level2: {
-              ...prev.level2,
-              terminalTarget: null,
-              wireAnimationActive: "barrier",
-              wireAnimationProgress: 0,
-              wireParticles: [],
-            },
-          }));
-        } else {
-          setGameState((prev) => ({
-            ...prev,
-            terminalMessage: "Неверный код! Проверь числа на дисплеях.",
-            terminalMessageType: "error",
-            errorMessageTimer: 1500,
-          }));
-        }
-      } else if (target === "barrier") {
-        if (enteredValue === gameState.level2.displayNumber2) {
-          // Запускаем анимацию тока по синему проводу к барьеру
-          setGameState((prev) => ({
-            ...prev,
-            showTerminal: false,
-            terminalInput: "",
-            terminalMessage: "",
-            terminalMessageType: "",
-            level2: {
-              ...prev.level2,
-              terminalTarget: null,
-              wireAnimationActive: "barrier",
-              wireAnimationProgress: 0,
-              wireParticles: [],
-            },
-          }));
-        } else if (enteredValue === gameState.level2.displayNumber1) {
-          setGameState((prev) => ({
-            ...prev,
-            terminalMessage: "Это код робота, а не барьера!",
-            terminalMessageType: "error",
-            errorMessageTimer: 1500,
-          }));
-        } else {
-          setGameState((prev) => ({
-            ...prev,
-            terminalMessage: "Неверный код! Проверь числа на дисплеях.",
-            terminalMessageType: "error",
-            errorMessageTimer: 1500,
-          }));
-        }
-      }
-    }
-  }, [gameState.terminalInput, gameState.targetNumber, gameState.currentLevel, gameState.level2.terminalTarget, gameState.level2.displayNumber1, gameState.level2.displayNumber2]);
-
-  // ==================== KEYBOARD HANDLING ====================
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Tab") {
-        e.preventDefault();
-        setGameState((prev) => ({
-          ...prev,
-          taskPanelExpanded: !prev.taskPanelExpanded,
-        }));
-        return;
-      }
-
-      if (gameState.showTerminal) {
-        if (e.key === "Escape") {
-          setGameState((prev) => ({
-            ...prev,
-            showTerminal: false,
-            terminalInput: "",
-            terminalMessage: "",
-            terminalMessageType: "",
-          }));
-        } else if (e.key === "Enter") {
-          handleTerminalSubmit();
-        }
-        return;
-      }
-
-      if (e.key === "e" || e.key === "E" || e.key === "у" || e.key === "У") {
-        if (gameState.currentLevel === 1) {
-          if (
-            isNearTerminal(gameState.playerPos.x, gameState.playerPos.y, 1) &&
-            !gameState.robotDisabled &&
-            gameState.spawnPhase === "ready"
-          ) {
-            setGameState((prev) => ({
-              ...prev,
-              showTerminal: true,
-              terminalMessage: "",
-              terminalMessageType: "",
-            }));
-            setTimeout(() => inputRef.current?.focus(), 50);
-          }
-        } else {
-          if (
-            isNearTerminal(gameState.playerPos.x, gameState.playerPos.y, 2) &&
-            gameState.spawnPhase === "ready" &&
-            !gameState.level2.playerDead
-          ) {
-            if (!gameState.level2.combatRobotDisabled) {
-              setGameState((prev) => ({
-                ...prev,
-                showTerminal: true,
-                terminalMessage: "",
-                terminalMessageType: "",
-                level2: {
-                  ...prev.level2,
-                  terminalTarget: "robot",
-                },
-              }));
-            } else if (gameState.level2.barrierActive) {
-              setGameState((prev) => ({
-                ...prev,
-                showTerminal: true,
-                terminalMessage: "",
-                terminalMessageType: "",
-                level2: {
-                  ...prev.level2,
-                  terminalTarget: "barrier",
-                },
-              }));
-            }
-            setTimeout(() => inputRef.current?.focus(), 50);
-          }
-        }
-        return;
-      }
-
-      if (e.key === " ") {
-        e.preventDefault();
-      }
-
-      keysPressed.current.add(e.key.toLowerCase());
     };
 
-    const handleKeyUp = (e: KeyboardEvent) => {
-      keysPressed.current.delete(e.key.toLowerCase());
-    };
+    supabase.auth
+      .getSession()
+      .then(({ data: { session } }) => handleSession(session?.user ?? null))
+      .catch(() => {
+        if (mounted) {
+          setScreen("auth");
+        }
+      })
+      .finally(() => {
+        if (mounted) {
+          setLoading(false);
+        }
+      });
 
-    window.addEventListener("keydown", handleKeyDown);
-    window.addEventListener("keyup", handleKeyUp);
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
+      await handleSession(session?.user ?? null);
+      if (mounted) {
+        setLoading(false);
+      }
+    });
 
     return () => {
-      window.removeEventListener("keydown", handleKeyDown);
-      window.removeEventListener("keyup", handleKeyUp);
+      mounted = false;
+      subscription.unsubscribe();
     };
-  }, [
-    gameState.showTerminal,
-    gameState.playerPos,
-    gameState.robotDisabled,
-    gameState.spawnPhase,
-    gameState.currentLevel,
-    gameState.level2.combatRobotDisabled,
-    gameState.level2.barrierActive,
-    gameState.level2.playerDead,
-    isNearTerminal,
-    handleTerminalSubmit,
-  ]);
+  }, []);
 
-  // ==================== WORLD CONFIG ====================
-  const worldConfig: WorldConfig = {
-    robotPos,
-    exitPos,
-    combatRobotPos,
-    level2ExitPos,
-    barrierX,
-    groundY,
+  const loadProgress = async (userId: string) => {
+    const progress = await getUserProgress(userId);
+    if (progress) {
+      setMaxLevelCompleted(progress.max_level_completed);
+      setKnowledgeLevel(progress.knowledge_level);
+    }
+    return progress;
   };
 
-  // ==================== GAME LOOP ====================
-  useEffect(() => {
-    let lastTime = performance.now();
+  const handleAuth = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAuthError("");
+    setAuthLoading(true);
 
-    const gameLoop = (currentTime: number) => {
-      const deltaTime = Math.min(currentTime - lastTime, 50);
-      lastTime = currentTime;
-
-      // Build input state from keysPressed
-      const input: InputState = {
-        left: keysPressed.current.has("a") || keysPressed.current.has("arrowleft") || keysPressed.current.has("ф"),
-        right: keysPressed.current.has("d") || keysPressed.current.has("arrowright") || keysPressed.current.has("в"),
-        jump: keysPressed.current.has(" "),
-      };
-
-      setGameState((prev) => updateGame(prev, input, deltaTime, worldConfig));
-
-      animationFrameRef.current = requestAnimationFrame(gameLoop);
-    };
-
-    animationFrameRef.current = requestAnimationFrame(gameLoop);
-
-    return () => {
-      cancelAnimationFrame(animationFrameRef.current);
-    };
-  }, [worldConfig]);
-
-  // ==================== RENDERING ====================
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-
-    // Фон
-    drawBackground(ctx, CANVAS_WIDTH, groundY, GROUND_HEIGHT, gameState.currentLevel);
-
-    if (gameState.currentLevel === 1) {
-      // ==================== LEVEL 1 RENDERING ====================
-      
-      // Exit
-      drawExit(ctx, exitPos, EXIT_WIDTH, EXIT_HEIGHT, !gameState.robotColliderActive);
-
-      // Terminal
-      const showTerminalHint = isNearTerminal(gameState.playerPos.x, gameState.playerPos.y, 1) &&
-        !gameState.robotDisabled &&
-        gameState.spawnPhase === "ready";
-      drawTerminal(ctx, terminalPos, TERMINAL_WIDTH, TERMINAL_HEIGHT, showTerminalHint);
-
-      // Robot
-      drawLevel1Robot(
-        ctx,
-        robotPos,
-        ROBOT_WIDTH,
-        ROBOT_HEIGHT,
-        gameState.robotDisabled,
-        gameState.robotAnimationPhase,
-        gameState.robotFlashOn,
-        gameState.robotCollapseOffset,
-        gameState.targetNumber
-      );
-
-      // Sparks
-      drawSparks(ctx, gameState.sparks);
-
-      // Start zone
-      drawStartZone(ctx, groundY);
-
-    } else {
-      // ==================== LEVEL 2 RENDERING ====================
-      // ГЕНЕРАТОР СПРАВА, ПРОВОДА ИДУТ СНИЗУ
-
-      const genHeight = 120;
-      
-      // Генератор (большой блок справа с дисплеями)
-      drawGenerator(
-        ctx,
-        generatorPos,
-        gameState.level2.combatRobotDisabled,
-        gameState.level2.barrierActive,
-        gameState.level2.displayNumber1,
-        gameState.level2.displayNumber2
-      );
-      
-      // Провода идут СНИЗУ от генератора
-      // Красный провод: генератор → вниз → по полу влево → вверх к роботу
-      const redWirePoints: Position[] = [
-        { x: generatorPos.x + 37, y: generatorPos.y + genHeight }, // низ генератора (красный дисплей)
-        { x: generatorPos.x + 37, y: groundY - 20 }, // вниз к полу
-        { x: combatRobotPos.x + COMBAT_ROBOT_WIDTH / 2, y: groundY - 20 }, // по полу к роботу
-        { x: combatRobotPos.x + COMBAT_ROBOT_WIDTH / 2, y: combatRobotPos.y + COMBAT_ROBOT_HEIGHT }, // вверх к роботу
-      ];
-      
-      // Синий провод: генератор → вниз → по полу влево → в землю (устройство барьера)
-      const blueWirePoints: Position[] = [
-        { x: generatorPos.x + 102, y: generatorPos.y + genHeight }, // низ генератора (синий дисплей)
-        { x: generatorPos.x + 102, y: groundY - 40 }, // вниз
-        { x: barrierX + 10, y: groundY - 40 }, // по полу к барьеру
-        { x: barrierX + 10, y: groundY }, // в землю
-      ];
-
-      // Рисуем провода
-      drawWires(ctx, redWirePoints, blueWirePoints, gameState.level2.combatRobotDisabled, gameState.level2.barrierActive);
-
-      // Анимация тока по проводам
-      if (gameState.level2.wireAnimationActive !== "none") {
-        const wirePoints = gameState.level2.wireAnimationActive === "robot" ? redWirePoints : blueWirePoints;
-        const wireColor = gameState.level2.wireAnimationActive === "robot" ? "#fef08a" : "#93c5fd";
-        drawWireAnimation(ctx, wirePoints, wireColor, gameState.level2.wireAnimationProgress);
+    try {
+      if (authMode === "register") {
+        const { error } = await supabase.auth.signUp({
+          email,
+          password,
+        });
+        if (error) throw error;
+      } else {
+        const { error } = await supabase.auth.signInWithPassword({
+          email,
+          password,
+        });
+        if (error) throw error;
       }
-
-      // Терминал Level 2 (такой же как Level 1 - синий корпус с мигающим курсором)
-      const showTerminal2Hint = isNearTerminal(gameState.playerPos.x, gameState.playerPos.y, 2) &&
-        gameState.spawnPhase === "ready" &&
-        !gameState.level2.playerDead &&
-        (!gameState.level2.combatRobotDisabled || gameState.level2.barrierActive) &&
-        gameState.level2.wireAnimationActive === "none";
-      drawTerminal(ctx, level2TerminalPos, TERMINAL_WIDTH, TERMINAL_HEIGHT, showTerminal2Hint);
-
-      // Барьер (энергетический щит)
-      if (gameState.level2.barrierActive) {
-        drawBarrier(ctx, barrierX, groundY, gameState.level2.barrierTimeLeft, BARRIER_MAX_TIME, gameState.level2.combatRobotDisabled);
-      }
-
-      // Пули
-      drawBullets(ctx, gameState.level2.bullets, BULLET_WIDTH, BULLET_HEIGHT);
-
-      // Боевой робот (позиция x=500, левее генератора)
-      drawCombatRobot(
-        ctx,
-        combatRobotPos.x,
-        combatRobotPos.y,
-        gameState.level2.combatRobotDisabled,
-        gameState.level2.combatRobotAnimPhase,
-        gameState.level2.combatRobotFlashCount,
-        gameState.level2.combatRobotCollapseOffset,
-        COMBAT_ROBOT_WIDTH,
-        COMBAT_ROBOT_HEIGHT
-      );
-
-      // Искры боевого робота
-      drawCombatSparks(ctx, gameState.level2.sparks);
-
-      // Exit Level 2
-      const exitActive = gameState.level2.combatRobotDisabled && !gameState.level2.barrierActive;
-      drawExit(ctx, level2ExitPos, EXIT_WIDTH, EXIT_HEIGHT, exitActive);
-
-      // Стартовая зона
-      drawStartZone(ctx, groundY);
+    } catch (err) {
+      setAuthError(err instanceof Error ? err.message : "Произошла ошибка");
+    } finally {
+      setAuthLoading(false);
     }
-
-    // ==================== SPAWN ANIMATION ====================
-    const playerCenterX = gameState.playerPos.x + PLAYER_WIDTH / 2;
-    const playerCenterY = gameState.playerPos.y + PLAYER_HEIGHT / 2;
-
-    if (gameState.spawnPhase === "beam") {
-      drawSpawnBeam(ctx, playerCenterX, groundY, gameState.spawnProgress);
-      drawSpawnParticles(ctx, gameState.spawnParticles);
-
-      ctx.globalAlpha = 0.3 + Math.sin(Date.now() * 0.02) * 0.2;
-      drawAstronaut(ctx, gameState.playerPos.x, gameState.playerPos.y, gameState.facingRight, false, true, 0, "ready", 1, PLAYER_WIDTH, PLAYER_HEIGHT);
-      ctx.globalAlpha = 1;
-    } else if (gameState.spawnPhase === "materialize") {
-      const materializedHeight = PLAYER_HEIGHT * gameState.spawnProgress;
-
-      ctx.save();
-      ctx.beginPath();
-      ctx.rect(gameState.playerPos.x - 20, gameState.playerPos.y + PLAYER_HEIGHT - materializedHeight, PLAYER_WIDTH + 40, materializedHeight + 20);
-      ctx.clip();
-
-      drawAstronaut(ctx, gameState.playerPos.x, gameState.playerPos.y, gameState.facingRight, false, true, 0, "materialize", gameState.spawnProgress, PLAYER_WIDTH, PLAYER_HEIGHT);
-      ctx.restore();
-
-      drawMaterializeRing(ctx, playerCenterX, playerCenterY, gameState.spawnProgress);
-    } else if (!gameState.level2.playerDead) {
-      drawAstronaut(
-        ctx,
-        gameState.playerPos.x,
-        gameState.playerPos.y,
-        gameState.facingRight,
-        gameState.isMoving,
-        gameState.isGrounded,
-        gameState.animationTime,
-        gameState.spawnPhase,
-        gameState.spawnProgress,
-        PLAYER_WIDTH,
-        PLAYER_HEIGHT
-      );
-    }
-
-    // Номер уровня
-    drawLevelLabel(ctx, gameState.currentLevel);
-
-  }, [gameState, isNearTerminal, robotPos, terminalPos, exitPos, level2ExitPos, combatRobotPos, level2TerminalPos, groundY, barrierX, generatorPos]);
-
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const filtered = e.target.value.replace(/[^01]/g, "");
-    setGameState((prev) => ({ ...prev, terminalInput: filtered }));
   };
 
-  const handleRestart = () => {
-    setGameState(initGameState(gameState.currentLevel));
-    keysPressed.current.clear();
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
   };
 
-  const handleNextLevel = () => {
-    setGameState(initGameState(2));
-    keysPressed.current.clear();
+  const handleLevelComplete = async (level: number) => {
+    if (user && level > maxLevelCompleted) {
+      setMaxLevelCompleted(level);
+      await updateUserProgress(user.id, level);
+    }
   };
 
-  // Получаем текущее число для терминала
-  const getTerminalNumber = () => {
-    if (gameState.currentLevel === 1) {
-      return gameState.targetNumber;
+  const handleStartGame = (level: number) => {
+    if (!knowledgeLevel) {
+      setPendingStartLevel(level);
+      setPlacementRetake(false);
+      setScreen("placement");
+      return;
     }
-    if (gameState.level2.terminalTarget === "robot") {
-      return gameState.level2.displayNumber1;
-    }
-    return gameState.level2.displayNumber2;
+
+    setSelectedLevel(level);
+    setScreen("game");
   };
 
-  const getTerminalLabel = () => {
-    if (gameState.currentLevel === 1) {
-      return "";
-    }
-    if (gameState.level2.terminalTarget === "robot") {
-      return "(красный провод - РОБОТ)";
-    }
-    return "(синий провод - БАРЬЕР)";
+  const handleExitGame = () => {
+    setScreen("menu");
   };
+
+  const handlePlacementComplete = (result: PlacementEvaluation) => {
+    setKnowledgeLevel(result.knowledgeLevel);
+
+    if (pendingStartLevel) {
+      setSelectedLevel(pendingStartLevel);
+      setPendingStartLevel(null);
+      setScreen("game");
+      return;
+    }
+
+    setPlacementRetake(false);
+    setScreen("menu");
+  };
+
+  if (loading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-slate-950">
+        <div className="text-2xl text-white">Загрузка...</div>
+      </div>
+    );
+  }
+
+  // Game screen
+  if (screen === "game") {
+    return (
+      <Game
+        startLevel={selectedLevel}
+        knowledgeLevel={knowledgeLevel}
+        onLevelComplete={handleLevelComplete}
+        onExit={handleExitGame}
+      />
+    );
+  }
+
+  if (screen === "placement" && user) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-slate-950 p-4">
+        <div className="absolute inset-0 overflow-hidden">
+          {[...Array(80)].map((_, i) => (
+            <div
+              key={i}
+              className="absolute rounded-full bg-white"
+              style={{
+                left: `${(i * 37) % 100}%`,
+                top: `${(i * 53) % 100}%`,
+                width: `${(i % 3) + 1}px`,
+                height: `${(i % 3) + 1}px`,
+                opacity: 0.25 + (i % 5) * 0.12,
+              }}
+            />
+          ))}
+        </div>
+        <PlacementTest
+          user={user}
+          retake={placementRetake}
+          onComplete={handlePlacementComplete}
+          onCancel={
+            placementRetake
+              ? () => {
+                  setPlacementRetake(false);
+                  setPendingStartLevel(null);
+                  setScreen("menu");
+                }
+              : undefined
+          }
+        />
+      </div>
+    );
+  }
 
   return (
-    <div className="relative flex min-h-screen items-center justify-center bg-slate-950">
-      <canvas
-        ref={canvasRef}
-        width={CANVAS_WIDTH}
-        height={CANVAS_HEIGHT}
-        className="rounded-lg border-4 border-slate-700 shadow-2xl"
-      />
-
-      {/* Панель задания */}
-      <div className="absolute top-4 right-4 z-10">
-        {gameState.taskPanelExpanded ? (
-          <div className="w-80 rounded-lg bg-slate-800 p-4 text-white shadow-xl border border-slate-600">
-            <div className="mb-3 flex items-center justify-between">
-              <h3 className="text-lg font-bold text-yellow-400">
-                {gameState.currentLevel === 1 ? "Задание" : "ВНИМАНИЕ: Боевая зона!"}
-              </h3>
-              <span className="text-xs text-slate-400">[Tab] свернуть</span>
-            </div>
-            {gameState.currentLevel === 1 ? (
-              <>
-                <p className="mb-3 text-sm">
-                  Перед роботом число{" "}
-                  <span className="font-bold text-yellow-400">{gameState.targetNumber}</span>.
-                  Переведи его в двоичную систему и введи в терминал.
-                </p>
-                <div className="rounded bg-slate-700 p-2 text-xs">
-                  <p className="text-slate-300">Напоминание:</p>
-                  <p className="font-mono text-green-400">13₍₁₀₎ = 1101₍₂₎</p>
-                </div>
-              </>
-            ) : (
-              <>
-                <p className="mb-3 text-sm text-red-300">
-                  Боевой робот атакует! Барьер защищает тебя, но ненадолго.
-                </p>
-                <p className="mb-3 text-sm">
-                  Справа генератор с двумя числами. Введи число в терминал — ток пойдёт по проводу и отключит цель.
-                </p>
-                <div className="rounded bg-slate-700 p-2 text-xs mb-2">
-                  <p className="text-red-400">
-                    <span className="font-bold">{gameState.level2.combatRobotDisabled ? "---" : gameState.level2.displayNumber1}</span> — красный → РОБОТ
-                  </p>
-                  <p className="text-blue-400">
-                    <span className="font-bold">{!gameState.level2.barrierActive ? "---" : gameState.level2.displayNumber2}</span> — синий → БАРЬЕР
-                  </p>
-                </div>
-                <p className="text-xs text-yellow-300">
-                  Подсказка: сначала отключи угрозу, потом — защиту!
-                </p>
-              </>
-            )}
-            <div className="mt-3 text-xs text-slate-400">
-              <p>A/D или ←/→ — движение</p>
-              <p>Space — прыжок</p>
-              <p>E — взаимодействие</p>
-            </div>
-          </div>
-        ) : (
-          <div className="cursor-pointer rounded bg-slate-700 px-3 py-2 text-sm text-white hover:bg-slate-600">
-            Задание [Tab]
-          </div>
-        )}
-      </div>
-
-      {/* Сообщение диктора */}
-      {gameState.level2.narratorMessage && (
-        <div className="absolute top-4 left-1/2 -translate-x-1/2 max-w-xl">
-          <div className="rounded-lg bg-slate-900 border-2 border-cyan-500 p-4 text-white shadow-xl">
-            <div className="flex items-start gap-3">
-              <div className="w-10 h-10 rounded-full bg-cyan-600 flex items-center justify-center flex-shrink-0">
-                <span className="text-xl">🎙</span>
-              </div>
-              <div>
-                <p className="text-sm text-cyan-400 font-bold mb-1">ДИКТОР</p>
-                <p className="text-sm">{gameState.level2.narratorMessage.text}</p>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Текущая цель */}
-      <div className="absolute bottom-4 left-1/2 -translate-x-1/2 rounded-full border border-slate-600 bg-slate-800 px-6 py-2 text-white">
-        <span className="text-slate-400">Цель:</span>{" "}
-        <span className="font-medium text-yellow-400">{gameState.currentGoal}</span>
-      </div>
-
-      {/* УРОВЕНЬ ПРОЙДЕН */}
-      {gameState.levelComplete &&
-        gameState.levelCompletePhase !== "none" &&
-        gameState.levelCompletePhase !== "showButton" &&
-        gameState.levelCompletePhase !== "transition" && (
+    <div className="flex min-h-screen items-center justify-center bg-slate-950">
+      {/* Stars background */}
+      <div className="absolute inset-0 overflow-hidden">
+        {[...Array(100)].map((_, i) => (
           <div
-            className="absolute left-1/2 top-16 -translate-x-1/2 text-5xl font-bold text-green-400 drop-shadow-lg"
-            style={{ opacity: gameState.levelCompleteOpacity }}
-          >
-            УРОВЕНЬ {gameState.currentLevel} ПРОЙДЕН!
-          </div>
-        )}
+            key={i}
+            className="absolute rounded-full bg-white"
+            style={{
+              left: `${Math.random() * 100}%`,
+              top: `${Math.random() * 100}%`,
+              width: `${Math.random() * 3 + 1}px`,
+              height: `${Math.random() * 3 + 1}px`,
+              opacity: Math.random() * 0.8 + 0.2,
+            }}
+          />
+        ))}
+      </div>
 
-      {/* Переход на следующий уровень (Level 1 -> Level 2) */}
-      {gameState.levelCompletePhase === "transition" && gameState.currentLevel === 1 && (
-        <div className="absolute inset-0 flex items-center justify-center bg-black/60">
-          <div className="rounded-2xl border-2 border-green-500 bg-slate-800 p-10 text-center shadow-2xl">
-            <h2 className="text-2xl font-bold text-green-400 mb-4">Уровень 1 пройден!</h2>
-            <p className="mb-6 text-slate-300">
-              Ты успешно перевёл {gameState.targetNumber}₍₁₀₎ в двоичную систему!
-            </p>
-            <button
-              onClick={handleNextLevel}
-              className="rounded-lg bg-green-600 px-8 py-4 text-lg font-bold text-white transition-colors hover:bg-green-500"
-            >
-              Перейти на уровень 2
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Кнопка перезапуска (Level 2 complete) */}
-      {gameState.levelCompletePhase === "showButton" && gameState.currentLevel === 2 && (
-        <div className="absolute inset-0 flex items-center justify-center bg-black/60">
-          <div className="rounded-2xl border-2 border-green-500 bg-slate-800 p-10 text-center shadow-2xl">
-            <h2 className="text-2xl font-bold text-green-400 mb-4">Поздравляем!</h2>
-            <p className="mb-6 text-slate-300">
-              Ты успешно прошёл оба уровня и освоил двоичную систему счисления!
-            </p>
-            <button
-              onClick={() => setGameState(initGameState(1))}
-              className="rounded-lg bg-green-600 px-8 py-4 text-lg font-bold text-white transition-colors hover:bg-green-500"
-            >
-              Играть снова
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Смерть игрока */}
-      {gameState.level2.playerDead && (
-        <div className="absolute inset-0 flex items-center justify-center bg-black/80">
-          <div className="rounded-2xl border-2 border-red-500 bg-slate-800 p-10 text-center shadow-2xl">
-            <h2 className="text-3xl font-bold text-red-500 mb-4">ПРОВАЛ</h2>
-            <p className="mb-6 text-slate-300">{gameState.level2.deathReason}</p>
-            <button
-              onClick={handleRestart}
-              className="rounded-lg bg-red-600 px-8 py-4 text-lg font-bold text-white transition-colors hover:bg-red-500"
-            >
-              Попробовать снова
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Терминал */}
-      {gameState.showTerminal && (
-        <div className="absolute inset-0 flex items-center justify-center bg-black/70">
-          <div className="relative w-96 rounded-xl border-2 border-blue-500 bg-slate-800 p-6 shadow-2xl">
-            <button
-              onClick={() =>
-                setGameState((prev) => ({
-                  ...prev,
-                  showTerminal: false,
-                  terminalInput: "",
-                  terminalMessage: "",
-                  terminalMessageType: "",
-                }))
-              }
-              className="absolute right-3 top-3 text-slate-400 hover:text-white"
-            >
-              ✕
-            </button>
-
-            <h2 className="mb-4 text-xl font-bold text-blue-400">
-              Терминал {getTerminalLabel()}
-            </h2>
-            <p className="mb-2 text-slate-300">
-              Введите число{" "}
-              <span className="font-bold text-yellow-400">{getTerminalNumber()}</span>{" "}
-              в двоичной системе:
+      {/* Auth Screen */}
+      {screen === "auth" && (
+        <div className="relative z-10 w-full max-w-md">
+          <div className="rounded-2xl border-2 border-slate-700 bg-slate-800/90 p-8 shadow-2xl backdrop-blur">
+            <h1 className="mb-2 text-center text-3xl font-bold text-cyan-400">
+              Binary Robot Challenge
+            </h1>
+            <p className="mb-6 text-center text-slate-400">
+              Образовательный платформер по информатике
             </p>
 
-            <div className="mb-4 flex gap-2">
-              <input
-                ref={inputRef}
-                type="text"
-                value={gameState.terminalInput}
-                onChange={handleInputChange}
-                placeholder="например: 1101"
-                className="flex-1 rounded border border-slate-600 bg-slate-900 px-4 py-3 font-mono text-lg text-white focus:border-blue-500 focus:outline-none"
-                autoFocus
-              />
+            <div className="mb-6 flex rounded-lg bg-slate-700 p-1">
               <button
-                onClick={handleTerminalSubmit}
-                className="rounded bg-blue-600 px-6 py-3 font-bold text-white transition-colors hover:bg-blue-500"
+                onClick={() => setAuthMode("login")}
+                className={`flex-1 rounded-md py-2 text-sm font-medium transition-colors ${
+                  authMode === "login"
+                    ? "bg-cyan-600 text-white"
+                    : "text-slate-300 hover:text-white"
+                }`}
               >
-                Ввести
+                Вход
+              </button>
+              <button
+                onClick={() => setAuthMode("register")}
+                className={`flex-1 rounded-md py-2 text-sm font-medium transition-colors ${
+                  authMode === "register"
+                    ? "bg-cyan-600 text-white"
+                    : "text-slate-300 hover:text-white"
+                }`}
+              >
+                Регистрация
               </button>
             </div>
 
-            {gameState.terminalMessage && gameState.terminalMessageType === "error" && (
-              <p className="mb-2 font-medium text-red-400">{gameState.terminalMessage}</p>
+            <form onSubmit={handleAuth}>
+              <div className="mb-4">
+                <label className="mb-1 block text-sm text-slate-300">Email</label>
+                <input
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className="w-full rounded-lg border border-slate-600 bg-slate-900 px-4 py-3 text-white focus:border-cyan-500 focus:outline-none"
+                  placeholder="example@mail.com"
+                  required
+                />
+              </div>
+
+              <div className="mb-6">
+                <label className="mb-1 block text-sm text-slate-300">Пароль</label>
+                <input
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="w-full rounded-lg border border-slate-600 bg-slate-900 px-4 py-3 text-white focus:border-cyan-500 focus:outline-none"
+                  placeholder="••••••••"
+                  required
+                  minLength={6}
+                />
+              </div>
+
+              {authError && (
+                <p className="mb-4 text-center text-sm text-red-400">{authError}</p>
+              )}
+
+              <button
+                type="submit"
+                disabled={authLoading}
+                className="w-full rounded-lg bg-cyan-600 py-3 font-bold text-white transition-colors hover:bg-cyan-500 disabled:opacity-50"
+              >
+                {authLoading
+                  ? "Загрузка..."
+                  : authMode === "login"
+                  ? "Войти"
+                  : "Зарегистрироваться"}
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Main Menu */}
+      {screen === "menu" && (
+        <div className="relative z-10 w-full max-w-lg">
+          <div className="rounded-2xl border-2 border-slate-700 bg-slate-800/90 p-8 shadow-2xl backdrop-blur">
+            <h1 className="mb-2 text-center text-4xl font-bold text-cyan-400">
+              Binary Robot Challenge
+            </h1>
+            <p className="mb-8 text-center text-slate-400">
+              Изучай двоичную систему счисления!
+            </p>
+
+            {user && (
+              <p className="mb-6 text-center text-sm text-slate-400">
+                Вы вошли как: <span className="text-cyan-400">{user.email}</span>
+              </p>
             )}
 
-            <p className="text-xs text-slate-500">
-              Допустимы только символы 0 и 1. Enter для отправки, Esc или ✕ для выхода.
+            {knowledgeLevel && (
+              <div className="mb-6 rounded-lg bg-slate-700/50 p-4 text-center text-sm text-slate-300">
+                Уровень подготовки:{" "}
+                <span className="font-bold text-cyan-400">
+                  {knowledgeLevelLabels[knowledgeLevel]}
+                </span>
+              </div>
+            )}
+
+            <div className="space-y-4">
+              <button
+                onClick={() => handleStartGame(1)}
+                className="w-full rounded-lg bg-green-600 py-4 text-xl font-bold text-white transition-colors hover:bg-green-500"
+              >
+                Новая игра
+              </button>
+
+              <button
+                onClick={() => setScreen("themes")}
+                className="w-full rounded-lg bg-blue-600 py-4 text-xl font-bold text-white transition-colors hover:bg-blue-500"
+              >
+                Выбор темы
+              </button>
+
+              <button
+                onClick={() => {
+                  setPendingStartLevel(null);
+                  setPlacementRetake(true);
+                  setScreen("placement");
+                }}
+                className="w-full rounded-lg bg-cyan-700 py-4 text-xl font-bold text-white transition-colors hover:bg-cyan-600"
+              >
+                Пройти тест заново
+              </button>
+
+              <button
+                onClick={handleLogout}
+                className="w-full rounded-lg bg-slate-600 py-4 text-xl font-bold text-white transition-colors hover:bg-slate-500"
+              >
+                Выход из аккаунта
+              </button>
+            </div>
+
+            <div className="mt-8 rounded-lg bg-slate-700/50 p-4">
+              <p className="text-center text-sm text-slate-300">
+                Прогресс: {maxLevelCompleted}/{TOTAL_LEVELS} уровней пройдено
+              </p>
+              <div className="mt-2 h-2 rounded-full bg-slate-600">
+                <div
+                  className="h-2 rounded-full bg-cyan-500 transition-all"
+                  style={{ width: `${(maxLevelCompleted / TOTAL_LEVELS) * 100}%` }}
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Themes Screen */}
+      {screen === "themes" && (
+        <div className="relative z-10 w-full max-w-lg">
+          <div className="rounded-2xl border-2 border-slate-700 bg-slate-800/90 p-8 shadow-2xl backdrop-blur">
+            <h2 className="mb-6 text-center text-3xl font-bold text-cyan-400">
+              Темы
+            </h2>
+
+            <div className="space-y-4 mb-6">
+              {THEMES.map((theme) => (
+                <button
+                  key={theme.id}
+                  onClick={() => {
+                    setSelectedTheme(theme.id);
+                    setScreen("levels");
+                  }}
+                  className="w-full rounded-xl border border-slate-600 bg-slate-700/60 p-4 text-left transition-colors hover:bg-slate-700"
+                >
+                  <div className="text-lg font-bold text-white">{theme.title}</div>
+                  <div className="text-sm text-slate-300">{theme.subtitle}</div>
+                </button>
+              ))}
+            </div>
+
+            <button
+              onClick={() => setScreen("menu")}
+              className="w-full rounded-lg bg-slate-600 py-3 font-bold text-white transition-colors hover:bg-slate-500"
+            >
+              Назад
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Level Select Screen */}
+      {screen === "levels" && (
+        <div className="relative z-10 w-full max-w-lg">
+          <div className="rounded-2xl border-2 border-slate-700 bg-slate-800/90 p-8 shadow-2xl backdrop-blur">
+            <h2 className="mb-2 text-center text-3xl font-bold text-cyan-400">
+              {activeTheme.title}
+            </h2>
+            <p className="mb-6 text-center text-sm text-slate-400">
+              {activeTheme.subtitle}
             </p>
+
+            <div className="grid grid-cols-2 gap-4 mb-6">
+              {activeTheme.levels.map((levelNum) => {
+                const isUnlocked = levelNum === 1 || maxLevelCompleted >= levelNum - 1;
+                const isCompleted = maxLevelCompleted >= levelNum;
+
+                return (
+                  <button
+                    key={levelNum}
+                    onClick={() => isUnlocked && handleStartGame(levelNum)}
+                    disabled={!isUnlocked}
+                    className={`relative rounded-xl p-6 text-center transition-all ${
+                      isUnlocked
+                        ? isCompleted
+                          ? "bg-green-600 hover:bg-green-500"
+                          : "bg-blue-600 hover:bg-blue-500"
+                        : "cursor-not-allowed bg-slate-700 opacity-50"
+                    }`}
+                  >
+                    <div className="text-3xl font-bold text-white">{levelNum}</div>
+                    <div className="mt-1 text-sm text-white/80">
+                      {levelNum === 1
+                        ? "Робот-охранник"
+                        : levelNum === 2
+                        ? "Боевой робот"
+                        : levelNum === 3
+                        ? "Платформы"
+                        : levelNum === 4
+                        ? "Логические ворота"
+                        : levelNum === 5
+                        ? "Авария на станции"
+                        : levelNum === 6
+                        ? "Робот-доставщик"
+                        : "Ремонт спутников"}
+                    </div>
+                    {isCompleted && (
+                      <div className="absolute -right-2 -top-2 rounded-full bg-yellow-400 p-1">
+                        <svg className="h-5 w-5 text-yellow-900" fill="currentColor" viewBox="0 0 20 20">
+                          <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
+                        </svg>
+                      </div>
+                    )}
+                    {!isUnlocked && (
+                      <div className="absolute inset-0 flex items-center justify-center rounded-xl bg-black/50">
+                        <svg className="h-8 w-8 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                        </svg>
+                      </div>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+
+            <button
+              onClick={() => setScreen("menu")}
+              className="w-full rounded-lg bg-slate-600 py-3 font-bold text-white transition-colors hover:bg-slate-500"
+            >
+              Назад
+            </button>
           </div>
         </div>
       )}
